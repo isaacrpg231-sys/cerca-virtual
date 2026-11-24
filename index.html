@@ -6,6 +6,7 @@
 <title>Cerca Virtual</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <meta name="theme-color" content="#101511">
+<meta name="versao" content="2">
 <style>
 /* Layout: tela de câmera em cima, placar das 4 fazendas embaixo, controles grandes pro dedo. Visual escuro fixo (sala de apresentação). */
 :root{
@@ -78,7 +79,7 @@ summary{cursor:pointer;font-weight:700;min-height:28px}
 .registro li{display:flex;gap:10px;align-items:center;font-size:14px}
 .registro img{width:96px;border-radius:6px;flex:none}
 .registro time{font-family:var(--mono);color:var(--fraco);font-size:12px;font-variant-numeric:tabular-nums}
-.vazio{color:var(--fraco);font-size:14px;margin:0}
+.vazio{color:var(--fraco);font-size:14px}
 .dica{color:var(--fraco);font-size:13px;margin:0}
 .passos{margin:8px 0 0;padding-left:20px;font-size:14px;display:grid;gap:4px;color:var(--fraco)}
 .passos b,.passos code{color:var(--fg)}
@@ -89,6 +90,15 @@ summary{cursor:pointer;font-weight:700;min-height:28px}
 </style>
 </head>
 <body>
+<div id="falha" hidden style="position:sticky;top:0;z-index:9;background:#ef4a3c;color:#fff;padding:12px;border-radius:0 0 10px 10px;font-size:14px"></div>
+<script>
+/* Mostra na tela se o código da página quebrar (ex.: colado cortado no GitHub) */
+(function(){
+  function mostrar(t){ var d=document.getElementById("falha"); if(!d) return; d.hidden=false; d.textContent=t; }
+  window.addEventListener("error",function(e){ mostrar("Erro na página: "+(e.message||"desconhecido")+" (linha "+(e.lineno||"?")+"). Mande um print disso."); });
+  window.addEventListener("load",function(){ setTimeout(function(){ if(!window.CercaDemo) mostrar("O código da página está incompleto ou não rodou. Abra o index.html no GitHub, confira se a última linha é </html> e cole o código de novo. Se estiver no WhatsApp/Instagram, abra no Chrome."); },800); });
+})();
+</script>
 <header class="topo">
   <h1>Cerca <b>Virtual</b></h1>
   <span id="pilula" class="pilula">desligado</span>
@@ -196,71 +206,764 @@ summary{cursor:pointer;font-weight:700;min-height:28px}
     </div>
   </section>
 </main>
+
 <script>
 "use strict";
-const P={LIMIAR:30,AREA_MIN:0.0013,DESLOC:0.06,MARGEM:0.07,FAIXA:0.035,RONDANDO:4,PARADO:5,ABSORVER:20,PESO_RUIDO:2.5,RUIDO_MAX:80,CONFIRMA:3,DESARMA:2,INTERVALO:15,QUADROS_CALIB:24,LARG_PROC:192};
-const CORES=[{id:"azul",nome:"Isaac",hex:"#3b82e8",h:[185,255],s:.40,v:.20},{id:"vermelho",nome:"Matheus",hex:"#e0413a",h:[335,15],s:.45,v:.25},{id:"amarelo",nome:"Ezequiel",hex:"#f0c419",h:[35,70],s:.40,v:.40},{id:"verde",nome:"Rian",hex:"#2fae5b",h:[75,165],s:.35,v:.20}];
-const CHAVE="cercaDemo.v2";
-const $=id=>document.getElementById(id);
-const Guarda={ler(){try{return JSON.parse(localStorage.getItem(CHAVE))||{};}catch(e){return{};}},salvar(d){try{localStorage.setItem(CHAVE,JSON.stringify(d));}catch(e){}}};
-const Visao={paraRGB(data,n){const out=new Float32Array(n*3);for(let i=0,j=0,k=0;i<n;i++,j+=4,k+=3){out[k]=data[j];out[k+1]=data[j+1];out[k+2]=data[j+2];}return out;},borrar(src,w,h){const tmp=new Float32Array(src.length),out=new Float32Array(src.length);for(let y=0;y<h;y++)for(let x=0;x<w;x++){const a=Math.max(0,x-1),b=Math.min(w-1,x+1),o=(y*w+x)*3,oa=(y*w+a)*3,ob=(y*w+b)*3;for(let c=0;c<3;c++)tmp[o+c]=(src[oa+c]+src[o+c]+src[ob+c])/3;}for(let y=0;y<h;y++){const a=Math.max(0,y-1),b=Math.min(h-1,y+1);for(let x=0;x<w;x++){const o=(y*w+x)*3,oa=(a*w+x)*3,ob=(b*w+x)*3;for(let c=0;c<3;c++)out[o+c]=(tmp[oa+c]+tmp[o+c]+tmp[ob+c])/3;}}return out;},morf(m,w,h,dilata){const out=new Uint8Array(m.length);for(let y=0;y<h;y++)for(let x=0;x<w;x++){let r=dilata?0:1;for(let dy=-1;dy<=1&&(dilata?!r:r);dy++){const yy=y+dy;if(yy<0||yy>=h){if(!dilata)r=0;continue;}for(let dx=-1;dx<=1;dx++){const xx=x+dx;if(xx<0||xx>=w){if(!dilata)r=0;continue;}const v=m[yy*w+xx];if(dilata&&v){r=1;break;}if(!dilata&&!v){r=0;break;}}}out[y*w+x]=r;}return out;},componentes(m,w,h,areaMin){const vis=new Uint8Array(m.length),pilha=new Int32Array(m.length),lista=[];for(let i=0;i<m.length;i++){if(!m[i]||vis[i])continue;let topo=0;pilha[topo++]=i;vis[i]=1;const px=[];let sx=0,sy=0,x0=w,y0=h,x1=0,y1=0;while(topo){const p=pilha[--topo];px.push(p);const x=p%w,y=(p-x)/w;sx+=x;sy+=y;if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;if(x>0&&m[p-1]&&!vis[p-1]){vis[p-1]=1;pilha[topo++]=p-1;}if(x<w-1&&m[p+1]&&!vis[p+1]){vis[p+1]=1;pilha[topo++]=p+1;}if(y>0&&m[p-w]&&!vis[p-w]){vis[p-w]=1;pilha[topo++]=p-w;}if(y<h-1&&m[p+w]&&!vis[p+w]){vis[p+w]=1;pilha[topo++]=p+w;}}if(px.length>=areaMin)lista.push({px,area:px.length,cx:sx/px.length,cy:sy/px.length,x0,y0,x1,y1});}return lista;},hsv(r,g,b){r/=255;g/=255;b/=255;const mx=Math.max(r,g,b),mn=Math.min(r,g,b),d=mx-mn;let h=0;if(d){if(mx===r)h=60*(((g-b)/d)%6);else if(mx===g)h=60*((b-r)/d+2);else h=60*((r-g)/d+4);}if(h<0)h+=360;return[h,mx?d/mx:0,mx];},acharCercas(rgb,w,h){const res={};for(const cor of CORES){const m=new Uint8Array(w*h);for(let i=0;i<w*h;i++){const[hh,s,v]=Visao.hsv(rgb[i*3],rgb[i*3+1],rgb[i*3+2]);const[a,b]=cor.h;const naFaixa=a<=b?(hh>=a&&hh<=b):(hh>=a||hh<=b);m[i]=(naFaixa&&s>=cor.s&&v>=cor.v)?1:0;}const lim=Visao.morf(m,w,h,true);const comps=Visao.componentes(lim,w,h,Math.max(12,w*h*0.002));comps.sort((a,b)=>b.area-a.area);const c=comps.find(c=>(c.x1-c.x0)>=w*0.08&&(c.y1-c.y0)>=h*0.08);if(!c)continue;let tl,tr,br,bl,a1=Infinity,a2=-Infinity,a3=-Infinity,a4=Infinity;for(const p of c.px){const x=p%w,y=(p-x)/w;if(x+y<a1){a1=x+y;tl=[x,y];}if(x-y>a2){a2=x-y;tr=[x,y];}if(x+y>a3){a3=x+y;br=[x,y];}if(x-y<a4){a4=x-y;bl=[x,y];}}res[cor.id]=[tl,tr,br,bl].map(([x,y])=>[(x+.5)/w,(y+.5)/h]);}return res;},dentroPoligono(x,y,pol){let d=false;for(let i=0,j=pol.length-1;i<pol.length;j=i++){const[xi,yi]=pol[i],[xj,yj]=pol[j];if(((yi>y)!==(yj>y))&&(x<(xj-xi)*(y-yi)/(yj-yi)+xi))d=!d;}return d;},distBorda(x,y,pol){let m=Infinity;for(let i=0,j=pol.length-1;i<pol.length;j=i++){const[ax,ay]=pol[j],[bx,by]=pol[i],dx=bx-ax,dy=by-ay,L=dx*dx+dy*dy||1;let t=((x-ax)*dx+(y-ay)*dy)/L;t=Math.max(0,Math.min(1,t));const ex=ax+t*dx-x,ey=ay+t*dy-y;m=Math.min(m,Math.hypot(ex,ey));}return m;},montarZona(cantos,w,h){const pol=cantos.map(([x,y])=>[x*w,y*h]),z=new Uint8Array(w*h);const faixa=P.FAIXA*w,margem=P.MARGEM*w;for(let y=0;y<h;y++)for(let x=0;x<w;x++){const cx=x+.5,cy=y+.5,d=Visao.distBorda(cx,cy,pol);z[y*w+x]=Visao.dentroPoligono(cx,cy,pol)?(d>faixa?2:1):(d<=margem?1:0);}return z;},mascaraPoligono(cantos,w,h){const pol=cantos.map(([x,y])=>[x*w,y*h]),z=new Uint8Array(w*h);for(let y=0;y<h;y++)for(let x=0;x<w;x++)z[y*w+x]=Visao.dentroPoligono(x+.5,y+.5,pol)?1:0;return z;},ordenarCantos(pts){const cx=pts.reduce((s,p)=>s+p[0],0)/pts.length,cy=pts.reduce((s,p)=>s+p[1],0)/pts.length;return pts.slice().sort((a,b)=>Math.atan2(a[1]-cy,a[0]-cx)-Math.atan2(b[1]-cy,b[0]-cx));}};
-class Calibrador{constructor(n){this.s=new Float64Array(n*3);this.q=new Float64Array(n*3);this.k=0;this.n=n;}somar(f){for(let i=0;i<f.length;i++){this.s[i]+=f[i];this.q[i]+=f[i]*f[i];}this.k++;}resultado(){const fundo=new Float32Array(this.n*3),vari=new Float32Array(this.n),k=this.k,cap=P.RUIDO_MAX*P.RUIDO_MAX;for(let i=0;i<this.n;i++){let mv=0;for(let c=0;c<3;c++){const m=this.s[i*3+c]/k;fundo[i*3+c]=m;mv=Math.max(mv,this.q[i*3+c]/k-m*m);}vari[i]=Math.min(cap,Math.max(0,mv));}return{fundo,vari};}}
-class Vigia{constructor(w,h,fundo,vari){this.w=w;this.h=h;this.n=w*h;this.fundo=fundo;this.vari=vari;this.desde=new Float32Array(this.n).fill(-1);this.hist=[];this.rastros=[];this.proxId=1;this.reaprender=0;this.ganho=[1,1,1];this.ignorar=null;}_ganho(f){const hs=[new Uint32Array(161),new Uint32Array(161),new Uint32Array(161)],tot=[0,0,0];for(let i=0;i<this.n;i+=2)for(let c=0;c<3;c++){const v=f[i*3+c];if(v<15||v>240)continue;const r=this.fundo[i*3+c]/v;const b=Math.round((r-0.4)*100);if(b<0||b>160)continue;hs[c][b]++;tot[c]++;}return hs.map((h,c)=>{if(tot[c]<50)return 1;let acc=0;for(let b=0;b<161;b++){acc+=h[b];if(acc>=tot[c]/2)return Math.max(0.6,Math.min(1.6,0.4+b/100));}return 1;});}analisar(f,agora,areaMinFrac,limiar){const{w,h,n,fundo,vari}=this,g=this._ganho(f);this.ganho=g;const mud=new Uint8Array(n),fc=new Float32Array(n*3),dif=new Float32Array(n);const celulas=new Uint32Array(9),celTot=new Uint32Array(9);for(let i=0;i<n;i++){const o=i*3,r=f[o],gg=f[o+1],b=f[o+2];const a0=r*g[0],a1=gg*g[1],a2=b*g[2];fc[o]=a0;fc[o+1]=a1;fc[o+2]=a2;const d=Math.max(Math.abs(a0-fundo[o]),Math.abs(a1-fundo[o+1]),Math.abs(a2-fundo[o+2]));dif[i]=d;const x=i%w,y=(i-x)/w,cel=Math.min(2,(3*y/h)|0)*3+Math.min(2,(3*x/w)|0);celTot[cel]++;if(Math.max(r,gg,b)>=250&&Math.max(fundo[o],fundo[o+1],fundo[o+2])>=200)continue;if(this.ignorar&&this.ignorar[i])continue;if(d>limiar+P.PESO_RUIDO*Math.sqrt(vari[i])){mud[i]=1;celulas[cel]++;}}let celCheias=0;for(let c=0;c<9;c++)if(celulas[c]>0.3*celTot[c])celCheias++;if(celCheias>=7)this.reaprender=8;this.hist.push(f);if(this.hist.length>4)this.hist.shift();if(this.reaprender>0){this.reaprender--;for(let i=0;i<n*3;i++)fundo[i]+=0.3*(fc[i]-fundo[i]);this.desde.fill(-1);this.rastros=[];return{luz:true,mud,manchas:[],rastros:[]};}let m=Visao.morf(Visao.morf(mud,w,h,false),w,h,true);m=Visao.morf(m,w,h,true);const manchas=Visao.componentes(m,w,h,Math.max(4,areaMinFrac*n));const velho=this.hist.length>=4?this.hist[0]:null,limMex=Math.max(12,0.6*limiar);for(const mc of manchas){let k=0;if(velho)for(const p of mc.px){const o=p*3;if(Math.max(Math.abs(f[o]-velho[o]),Math.abs(f[o+1]-velho[o+1]),Math.abs(f[o+2]-velho[o+2]))>limMex)k++;}mc.mexeu=k>=Math.max(3,0.12*mc.area);}this._seguir(manchas,agora);const cap=P.RUIDO_MAX*P.RUIDO_MAX;for(let i=0;i<n;i++){const o=i*3;if(!mud[i]){fundo[o]+=0.02*(fc[o]-fundo[o]);fundo[o+1]+=0.02*(fc[o+1]-fundo[o+1]);fundo[o+2]+=0.02*(fc[o+2]-fundo[o+2]);vari[i]=Math.min(cap,vari[i]+0.01*(dif[i]*dif[i]-vari[i]));this.desde[i]=-1;}else if(this.desde[i]<0)this.desde[i]=agora;else if(agora-this.desde[i]>P.ABSORVER){fundo[o]=fc[o];fundo[o+1]=fc[o+1];fundo[o+2]=fc[o+2];this.desde[i]=-1;}}return{luz:false,mud,manchas,rastros:this.rastros};}_seguir(manchas,agora){const w=this.w,usados=new Set();manchas.sort((a,b)=>b.area-a.area);for(const mc of manchas){const lim=Math.max(0.12*w,1.5*Math.sqrt(mc.area));let melhor=null,md=Infinity;for(const r of this.rastros){if(usados.has(r))continue;const d=Math.hypot(r.x-mc.cx,r.y-mc.cy);if(d<lim&&d<md){md=d;melhor=r;}}let r=melhor;if(!r){r={id:this.proxId++,ox:mc.cx,oy:mc.cy,vida:0,mexidas:0,ultMex:agora,anda:false};this.rastros.push(r);}usados.add(r);r.x=mc.cx;r.y=mc.cy;r.vida++;r.visto=agora;if(mc.mexeu){r.mexidas++;r.ultMex=agora;}if(agora-r.ultMex>P.PARADO){r.anda=false;r.ox=r.x;r.oy=r.y;r.mexidas=0;}else if(!r.anda&&r.vida>=3&&r.mexidas>=3&&Math.hypot(r.x-r.ox,r.y-r.oy)>=P.DESLOC*w)r.anda=true;mc.rastro=r;}this.rastros=this.rastros.filter(r=>agora-r.visto<0.6);}}
-const Som={ctx:null,preparar(){try{if(!this.ctx)this.ctx=new(window.AudioContext||window.webkitAudioContext)();if(this.ctx.state==="suspended")this.ctx.resume();}catch(e){}},tom(f0,f1,dur,tipo,vol){if(!this.ctx)return;const c=this.ctx,t=c.currentTime,o=c.createOscillator(),g=c.createGain();o.type=tipo;o.frequency.setValueAtTime(f0,t);for(let k=0;k<dur/0.5;k++){o.frequency.linearRampToValueAtTime(f1,t+k*0.5+0.25);o.frequency.linearRampToValueAtTime(f0,t+k*0.5+0.5);}g.gain.setValueAtTime(0.0001,t);g.gain.exponentialRampToValueAtTime(vol,t+0.03);g.gain.setValueAtTime(vol,t+dur-0.1);g.gain.exponentialRampToValueAtTime(0.0001,t+dur);o.connect(g).connect(c.destination);o.start(t);o.stop(t+dur+0.05);},sirene(){this.tom(650,1300,3,"sawtooth",0.25);},bip(){this.tom(880,880,0.35,"square",0.12);}};
-const Tela={trava:null,async manter(){try{if("wakeLock"in navigator&&!this.trava){this.trava=await navigator.wakeLock.request("screen");this.trava.addEventListener("release",()=>{this.trava=null;});}}catch(e){}},soltar(){try{this.trava&&this.trava.release();}catch(e){}this.trava=null;}};
-const Maquete={W:640,H:480,cv:null,ctx:null,ruido:null,luz:1,expo:1,led:true,boi:{x:320,y:240,alvo:null,fila:[]},arrastando:false,fazendas:{azul:[20,20,190,210],vermelho:[260,20,430,210],amarelo:[20,270,190,460],verde:[260,270,430,460]},iniciar(){this.cv=document.createElement("canvas");this.cv.width=this.W;this.cv.height=this.H;this.ctx=this.cv.getContext("2d");const r=document.createElement("canvas");r.width=256;r.height=256;const rc=r.getContext("2d"),im=rc.createImageData(256,256);for(let i=0;i<im.data.length;i+=4){const v=Math.random()*255;im.data[i]=im.data[i+1]=im.data[i+2]=v;im.data[i+3]=255;}rc.putImageData(im,0,0);this.ruido=r;this.boi={x:560,y:240,alvo:null,fila:[]};this.passeio();},passeio(){this.boi.fila.push({x:525+Math.random()*90,y:40+Math.random()*400,espera:1.5,v:60});},ir(pts,v){this.boi.alvo=null;this.boi.fila=pts.map(p=>({x:p[0],y:p[1],espera:p[2]||0,v:v||150}));},pular(id){const[x0,y0,x1,y1]=this.fazendas[id],cx=(x0+x1)/2,cy=(y0+y1)/2;if(cx>200)this.ir([[540,cy],[cx-20,cy+20,3],[540,cy],[560,240,1]]);else this.ir([[540,240],[225,240],[225,cy],[cx+10,cy+20,3],[225,cy],[225,240],[540,240],[560,240,1]]);},rondar(){const[x0,y0,x1,y1]=this.fazendas.verde;this.ir([[540,y0+20],[x1+28,y0+20],[x1+28,y1-20],[x1+28,y0+20],[x1+28,y1-20],[540,y1-20],[560,240,1]],60);},quadro(t,dt){const c=this.ctx,b=this.boi;if(!this.arrastando){if(!b.alvo&&b.fila.length)b.alvo=b.fila.shift();if(b.alvo){const dx=b.alvo.x-b.x,dy=b.alvo.y-b.y,d=Math.hypot(dx,dy),v=(b.alvo.v||110)*dt;if(d>v){b.x+=dx/d*v;b.y+=dy/d*v;}else{b.x=b.alvo.x;b.y=b.alvo.y;b.alvo.espera-=dt;if(b.alvo.espera<=0)b.alvo=null;}}else this.passeio();}this.expo+=((1/this.luz)*0.7+0.3-this.expo)*Math.min(1,dt*0.8);const L=Math.min(1.3,this.luz*this.expo);c.fillStyle=this.tom([40,34,30],L);c.fillRect(0,0,this.W,this.H);for(const cor of CORES){const[x0,y0,x1,y1]=this.fazendas[cor.id];c.fillStyle=this.tom([58,72,44],L);c.fillRect(x0,y0,x1-x0,y1-y0);c.strokeStyle=this.tom(this.rgb(cor.hex),L);c.lineWidth=10;c.strokeRect(x0+5,y0+5,x1-x0-10,y1-y0-10);}c.strokeStyle=this.tom([90,80,70],L);c.lineWidth=3;c.setLineDash([10,8]);c.strokeRect(505,15,125,450);c.setLineDash([]);c.fillStyle=this.tom([25,25,28],L);c.fillRect(80,60,56,76);c.fillStyle=this.tom([60,60,66],L);c.beginPath();c.arc(108,88,16,0,7);c.fill();if(this.led){const hue=(t*240)%360,on=(Math.sin(t*14)>-0.2);c.fillStyle=on?`hsl(${hue} 100% 60%)`:"#222";c.fillRect(84,122,48,8);c.beginPath();c.arc(108,88,6,0,7);c.fill();}c.save();c.translate(b.x,b.y);c.fillStyle=this.tom([150,95,55],L);c.beginPath();c.ellipse(0,0,24,16,0,0,7);c.fill();c.fillStyle=this.tom([235,230,220],L);c.beginPath();c.ellipse(-8,-4,8,6,0,0,7);c.fill();c.fillStyle=this.tom([120,70,40],L);c.beginPath();c.ellipse(24,-2,10,9,0,0,7);c.fill();c.restore();c.globalAlpha=0.07;c.globalCompositeOperation="overlay";c.drawImage(this.ruido,-(Math.random()*200)|0,-(Math.random()*200)|0,this.W+256,this.H+256);c.globalAlpha=1;c.globalCompositeOperation="source-over";},rgb(hex){return[1,3,5].map(i=>parseInt(hex.substr(i,2),16));},tom(rgb,L){return`rgb(${rgb.map(v=>Math.min(255,v*L)|0).join(",")})`;}};
-const Camera={stream:null,ids:[],atual:-1,bloqueada(){if(!window.isSecureContext)return"sem-https";if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)return"sem-api";return null;},async abrir(deviceId){this.parar();const video=deviceId?{deviceId:{exact:deviceId}}:{facingMode:{ideal:"environment"}};Object.assign(video,{width:{ideal:1280},height:{ideal:720}});let s;try{s=await navigator.mediaDevices.getUserMedia({video,audio:false});}catch(e){if(e&&(e.name==="OverconstrainedError"||e.name==="ConstraintNotSatisfiedError"))s=await navigator.mediaDevices.getUserMedia({video:true,audio:false});else throw e;}this.stream=s;s.getVideoTracks().forEach(t=>t.addEventListener("ended",()=>cameraParou()));try{const d=await navigator.mediaDevices.enumerateDevices();this.ids=d.filter(x=>x.kind==="videoinput").map(x=>x.deviceId).filter(Boolean);}catch(e){this.ids=[];}const st=s.getVideoTracks()[0]&&s.getVideoTracks()[0].getSettings?s.getVideoTracks()[0].getSettings():{};this.atual=this.ids.indexOf(st.deviceId);return s;},viva(){return!!(this.stream&&this.stream.getVideoTracks().some(t=>t.readyState==="live"));},parar(){if(this.stream)this.stream.getTracks().forEach(t=>t.stop());this.stream=null;}};
-function erroDaCamera(e){const nome=e&&e.name||String(e);if(nome==="sem-https")return"A câmera só abre em endereço https (ou no próprio computador). Abra pelo link do GitHub Pages no Chrome ou Safari.";if(nome==="sem-api")return"Este navegador não deixa usar a câmera. Abra no Chrome (Android) ou Safari (iPhone), fora do WhatsApp/Instagram.";if(nome==="NotAllowedError"||nome==="SecurityError")return"A câmera foi bloqueada. "+comoLiberar()+" Se você está abrindo dentro de outro app (WhatsApp, Instagram, Claude), abra no Chrome ou Safari.";if(nome==="NotFoundError"||nome==="DevicesNotFoundError")return"Nenhuma câmera encontrada neste aparelho.";if(nome==="NotReadableError"||nome==="TrackStartError")return"A câmera está ocupada por outro app. Feche os outros apps de câmera e toque em Tentar de novo.";return"Não consegui abrir a câmera ("+nome+"). Toque em Tentar de novo ou use a Simulação.";}
-function comoLiberar(){const ua=navigator.userAgent;if(/iPhone|iPad/.test(ua))return"No iPhone: toque em \"aA\" na barra de endereço > Ajustes do Site > Câmera > Permitir, e recarregue.";if(/Android/.test(ua))return"No Android: toque no cadeado ao lado do endereço > Permissões > Câmera > Permitir, e recarregue.";return"Clique no cadeado ao lado do endereço, permita a câmera e recarregue a página.";}
-const salvo=Guarda.ler();
-const est={fonte:null,modo:"desligado",visao:false,cal:null,vigia:null,zonas:null,ign:null,w:P.LARG_PROC,h:144,aspecto:0,contagemAte:0,marcando:null,ultimo:null,limiar:salvo.limiar||P.LIMIAR,area:salvo.area||13,som:salvo.som!==false,suspeito:salvo.suspeito!==false,nomes:Object.assign({},...CORES.map(c=>({[c.id]:c.nome})),salvo.nomes||{}),cantos:salvo.cantos||{camera:{},simulacao:{}},ignorar:salvo.ignorar||{camera:[],simulacao:[]},faz:{},registro:[],tg:Object.assign({token:"",donos:{},contatos:[]},salvo.tg||{})};
-for(const c of CORES)est.faz[c.id]={estado:"limpo",conf:0,ultInv:-1e9,pertoDesde:null,pertoUlt:-1e9,ultAlerta:{invasao:-1e9,suspeito:-1e9}};
-function guardar(){Guarda.salvar({limiar:est.limiar,area:est.area,som:est.som,suspeito:est.suspeito,nomes:est.nomes,cantos:est.cantos,ignorar:est.ignorar,tg:est.tg});}
-const tela=$("tela"),tctx=tela.getContext("2d"),video=$("video");
-const proc=document.createElement("canvas"),pctx=proc.getContext("2d",{willReadFrequently:true});
-function fonteDims(){if(est.fonte==="simulacao")return[Maquete.W,Maquete.H];return[video.videoWidth||0,video.videoHeight||0];}
-function ajustarTamanho(){const[vw,vh]=fonteDims();if(!vw||!vh)return false;const asp=vw/vh;if(Math.abs(asp-est.aspecto)>0.01){const mudouGirando=est.aspecto>0;est.aspecto=asp;est.w=P.LARG_PROC;est.h=Math.round(P.LARG_PROC/asp);proc.width=est.w;proc.height=est.h;const dw=Math.min(960,vw);tela.width=dw;tela.height=Math.round(dw/asp);if(mudouGirando&&(est.modo==="vigiando"||est.modo==="calibrando")){parar();aviso("A imagem mudou de formato (celular girou?). Confira as cercas e toque em Vigiar de novo.",false);}}return true;}
-function lerQuadro(){pctx.drawImage(est.fonte==="simulacao"?Maquete.cv:video,0,0,est.w,est.h);const d=pctx.getImageData(0,0,est.w,est.h).data;return Visao.paraRGB(d,est.w*est.h);}
-const cantosAtuais=()=>est.cantos[est.fonte]||(est.cantos[est.fonte]={});
-const ignAtuais=()=>est.ignorar[est.fonte]||(est.ignorar[est.fonte]=[]);
-let ultProc=0,ultT=performance.now();
-function laco(){requestAnimationFrame(laco);const agoraMs=performance.now(),dt=Math.min(0.1,(agoraMs-ultT)/1000);ultT=agoraMs;if(!est.fonte)return;if(est.fonte==="simulacao")Maquete.quadro(agoraMs/1000,dt);else if(video.readyState<2)return;if(!ajustarTamanho())return;tctx.drawImage(est.fonte==="simulacao"?Maquete.cv:video,0,0,tela.width,tela.height);if(agoraMs-ultProc>=66){ultProc=agoraMs;passo(agoraMs/1000);}desenhar(agoraMs/1000);}
-function passo(agora){if(est.modo==="contagem"){const falta=Math.ceil(est.contagemAte-agora);$("contagem").hidden=false;$("contagem").innerHTML=`${Math.max(1,falta)}<small>Tire a mão e tudo que se mexe da frente da câmera</small>`;if(agora>=est.contagemAte){est.modo="calibrando";est.cal=new Calibrador(est.w*est.h);}return;}if(est.modo==="calibrando"){est.cal.somar(Visao.borrar(lerQuadro(),est.w,est.h));$("contagem").innerHTML=`<span style="font-size:28px">Aprendendo o fundo…</span><small>${Math.round(100*est.cal.k/P.QUADROS_CALIB)}%</small>`;if(est.cal.k>=P.QUADROS_CALIB){const{fundo,vari}=est.cal.resultado();est.vigia=new Vigia(est.w,est.h,fundo,vari);est.vigia.ignorar=est.ign;est.cal=null;est.modo="vigiando";$("contagem").hidden=true;Tela.manter();render();}return;}if(est.modo==="vigiando"){const f=Visao.borrar(lerQuadro(),est.w,est.h);const r=est.vigia.analisar(f,agora,est.area/10000,est.limiar);est.ultimo=r;avaliar(r,agora);}}
-function avaliar(r,agora){for(const c of CORES){const z=est.zonas[c.id],F=est.faz[c.id];if(!z)continue;let dentro=false,perto=false;if(!r.luz)for(const mc of r.manchas){if(!mc.rastro||!mc.rastro.anda)continue;let kd=0,kp=0;for(const p of mc.px){if(z[p]===2)kd++;else if(z[p]===1)kp++;}if(kd>=Math.max(4,0.25*mc.area))dentro=true;else if(kd+kp>0)perto=true;}const antes=F.estado;if(dentro){F.conf++;F.ultInv=agora;if(F.conf>=P.CONFIRMA)F.estado="invasao";}else{F.conf=0;if(F.estado==="invasao"&&agora-F.ultInv>P.DESARMA)F.estado="limpo";}if(F.estado!=="invasao"){if(perto||dentro){if(F.pertoDesde===null)F.pertoDesde=agora;F.pertoUlt=agora;F.estado=agora-F.pertoDesde>=P.RONDANDO?"suspeito":"tentativa";}else if(agora-F.pertoUlt>1){F.pertoDesde=null;F.estado="limpo";}}if(F.estado==="invasao"&&antes!=="invasao")alertar(c,"invasao",agora);if(F.estado==="suspeito"&&antes!=="suspeito"&&est.suspeito)alertar(c,"suspeito",agora);if(antes!==F.estado)render();}}
-function alertar(cor,tipo,agora){const F=est.faz[cor.id];if(agora-F.ultAlerta[tipo]<P.INTERVALO)return;F.ultAlerta[tipo]=agora;if(est.som){tipo==="invasao"?Som.sirene():Som.bip();}try{navigator.vibrate&&navigator.vibrate(tipo==="invasao"?[400,150,400,150,400]:[150]);}catch(e){}const mini=document.createElement("canvas");mini.width=320;mini.height=Math.round(320*tela.height/tela.width);mini.getContext("2d").drawImage(tela,0,0,mini.width,mini.height);let foto="";try{foto=mini.toDataURL("image/jpeg",0.7);}catch(e){}const oc={tipo,cor,nome:est.nomes[cor.id],hora:new Date(),foto,envio:""};est.registro.unshift(oc);if(est.registro.length>30)est.registro.pop();renderRegistro();avisarTelegram(oc,mini);}
-const Telegram={url(m){return"https://api.telegram.org/bot"+est.tg.token.trim()+"/"+m;},async chamar(metodo,corpo){if(!est.tg.token.trim())throw new Error("sem token");let r;try{r=await fetch(this.url(metodo),{method:"POST",body:corpo});}catch(e){throw new Error("sem internet");}let j={};try{j=await r.json();}catch(e){}if(!j.ok){if(r.status===401||r.status===404)throw new Error("token inválido");if(r.status===403)throw new Error("o dono bloqueou o bot");if(r.status===400&&/chat not found/i.test(j.description||""))throw new Error("o dono ainda não tocou em Iniciar");throw new Error(j.description||("erro "+r.status));}return j.result;},async mensagem(chat,texto){const f=new FormData();f.append("chat_id",chat);f.append("text",texto);return this.chamar("sendMessage",f);},async foto(chat,blob,legenda){const f=new FormData();f.append("chat_id",chat);f.append("caption",legenda);f.append("photo",blob,"invasao.jpg");return this.chamar("sendPhoto",f);},async contatos(){const lista=await this.chamar("getUpdates",new FormData()),achados={};for(const u of lista){const m=u.message||u.edited_message||u.my_chat_member;const ch=m&&m.chat;if(!ch||ch.type!=="private")continue;achados[ch.id]={id:ch.id,nome:[ch.first_name,ch.last_name].filter(Boolean).join(" ")||ch.username||String(ch.id)};}return Object.values(achados);}};
-function legendaAlerta(oc){const h=oc.hora.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});return oc.tipo==="invasao"?`🚨 INVASÃO na fazenda de ${oc.nome} (cerca ${oc.cor.id}) às ${h}!`:`⚠️ Movimento suspeito rondando a cerca de ${oc.nome} (${oc.cor.id}) às ${h}.`;}
-async function avisarTelegram(oc,mini){const chat=est.tg.donos[oc.cor.id];if(!est.tg.token.trim()||!chat){if(est.tg.token.trim()){oc.envio="Telegram: fazenda sem dono escolhido";oc.envioOk=false;renderRegistro();}return;}oc.envio="enviando para o Telegram…";oc.envioOk=true;renderRegistro();const leg=legendaAlerta(oc);try{const blob=await new Promise(r=>mini.toBlob(r,"image/jpeg",0.8));if(!blob)throw new Error("sem foto");await Telegram.foto(chat,blob,leg);oc.envio="✓ foto enviada ao Telegram";oc.envioOk=true;}catch(e){if(e.message==="sem internet"||e.message==="token inválido"){oc.envio="Telegram falhou: "+e.message;oc.envioOk=false;}else try{await Telegram.mensagem(chat,leg);oc.envio="✓ mensagem enviada (sem foto)";oc.envioOk=true;}catch(e2){oc.envio="Telegram falhou: "+e2.message;oc.envioOk=false;}}renderRegistro();}
-function tgMsg(t,ruim){const m=$("tgMsg");m.textContent=t;m.style.color=ruim?"var(--perigo)":"";}
-function renderTelegram(){const n=CORES.filter(c=>est.tg.donos[c.id]).length;$("tgResumo").textContent=!est.tg.token?"· não configurado":`· ${n} de 4 fazendas ligadas`;const cont=est.tg.contatos||[];$("tgDonos").innerHTML=CORES.map(c=>{const atual=est.tg.donos[c.id]||"";const ops=[`<option value="">ninguém</option>`].concat(cont.map(p=>`<option value="${p.id}" ${String(p.id)===String(atual)?"selected":""}>${esc(p.nome)}</option>`));if(atual&&!cont.some(p=>String(p.id)===String(atual)))ops.push(`<option value="${esc(atual)}" selected>contato salvo</option>`);return`<label class="dono" style="border-left:5px solid ${c.hex};padding-left:8px">Fazenda de ${esc(est.nomes[c.id])}<select id="tgDono-${c.id}">${ops.join("")}</select></label>`;}).join("");CORES.forEach(c=>$("tgDono-"+c.id).addEventListener("change",e=>{est.tg.donos[c.id]=e.target.value;guardar();renderTelegram();}));}
-async function buscarDonos(){if(!est.tg.token.trim()){tgMsg("Cole o token do bot primeiro.",true);return;}tgMsg("Buscando quem tocou em Iniciar…");try{const novos=await Telegram.contatos(),mapa={};for(const p of(est.tg.contatos||[]).concat(novos))mapa[p.id]=p;est.tg.contatos=Object.values(mapa);for(const c of CORES){if(est.tg.donos[c.id])continue;const nome=(est.nomes[c.id]||"").toLowerCase().split(" ")[0];const p=est.tg.contatos.find(p=>nome&&p.nome.toLowerCase().startsWith(nome));if(p)est.tg.donos[c.id]=String(p.id);}guardar();renderTelegram();tgMsg(novos.length?`Achei ${est.tg.contatos.length} pessoa(s). Confira o dono de cada fazenda abaixo.`:"Ninguém mandou mensagem ainda. Peça para cada dono abrir o bot, tocar em Iniciar, e toque em Buscar de novo.",!novos.length);}catch(e){tgMsg("Não deu: "+e.message+".",true);}}
-async function testeTelegram(){const alvos=CORES.filter(c=>est.tg.donos[c.id]);if(!est.tg.token.trim()){tgMsg("Cole o token do bot primeiro.",true);return;}if(!alvos.length){tgMsg("Escolha o dono de pelo menos uma fazenda.",true);return;}tgMsg("Mandando teste…");const res=[];for(const c of alvos){try{await Telegram.mensagem(est.tg.donos[c.id],`✅ Teste da Cerca Virtual: você vai receber os alertas da fazenda ${c.id} (${est.nomes[c.id]}).`);res.push(est.nomes[c.id]+" ok");}catch(e){res.push(est.nomes[c.id]+": "+e.message);}}tgMsg(res.join(" · "),res.some(r=>!r.endsWith(" ok")));}
-function desenhar(t){const sx=tela.width,sy=tela.height,cantos=cantosAtuais();if(est.visao&&est.ultimo){const{mud}=est.ultimo,im=pctx.createImageData(est.w,est.h);for(let i=0;i<mud.length;i++){im.data[i*4]=mud[i]?255:0;im.data[i*4+1]=mud[i]?60:0;im.data[i*4+3]=mud[i]?200:0;}pctx.putImageData(im,0,0);tctx.imageSmoothingEnabled=false;tctx.drawImage(proc,0,0,sx,sy);tctx.imageSmoothingEnabled=true;}tctx.lineWidth=Math.max(2,sx/240);for(const pol of ignAtuais()){tctx.setLineDash([8,6]);tctx.strokeStyle="#bbb";tctx.fillStyle="rgba(120,120,120,.25)";caminho(pol,sx,sy);tctx.fill();tctx.stroke();tctx.setLineDash([]);rotulo("ignorado",pol[0][0]*sx,pol[0][1]*sy-4,"#ccc");}for(const c of CORES){const pol=cantos[c.id];if(!pol)continue;const F=est.faz[c.id];tctx.strokeStyle=c.hex;if(F.estado==="invasao"){tctx.fillStyle=(Math.floor(t*4)%2)?"rgba(239,74,60,.45)":"rgba(239,74,60,.15)";}else if(F.estado==="suspeito")tctx.fillStyle="rgba(242,184,75,.30)";else tctx.fillStyle="rgba(0,0,0,0)";caminho(pol,sx,sy);tctx.fill();tctx.stroke();const cx=pol.reduce((s,p)=>s+p[0],0)/4*sx,cy=pol.reduce((s,p)=>s+p[1],0)/4*sy;rotulo(est.nomes[c.id]+(F.estado==="invasao"?" · INVASÃO":F.estado==="suspeito"?" · suspeito":""),cx,cy,"#fff",true);}if(est.modo==="vigiando"&&est.ultimo){const kx=sx/est.w,ky=sy/est.h;if(est.ultimo.luz)rotulo("luz mudou: reaprendendo",sx/2,24,"#f2b84b",true);for(const mc of est.ultimo.manchas){const anda=mc.rastro&&mc.rastro.anda;tctx.strokeStyle=anda?"#4cc27a":"rgba(200,200,200,.6)";tctx.lineWidth=anda?3:1.5;tctx.strokeRect(mc.x0*kx,mc.y0*ky,(mc.x1-mc.x0+1)*kx,(mc.y1-mc.y0+1)*ky);if(anda)rotulo("em movimento",mc.x0*kx,mc.y0*ky-4,"#4cc27a");}}if(est.marcando){const m=est.marcando,pts=m.pts,cor=m.tipo==="ignorar"?"#ddd":CORES[m.i].hex;tctx.strokeStyle=cor;tctx.fillStyle=cor;tctx.lineWidth=3;if(pts.length){tctx.beginPath();pts.forEach((p,k)=>k?tctx.lineTo(p[0]*sx,p[1]*sy):tctx.moveTo(p[0]*sx,p[1]*sy));tctx.stroke();}for(const p of pts){tctx.beginPath();tctx.arc(p[0]*sx,p[1]*sy,Math.max(6,sx/100),0,7);tctx.fill();}}}
-function caminho(pol,sx,sy){tctx.beginPath();pol.forEach((p,k)=>k?tctx.lineTo(p[0]*sx,p[1]*sy):tctx.moveTo(p[0]*sx,p[1]*sy));tctx.closePath();}
-function rotulo(txt,x,y,cor,centro){const fs=Math.max(12,tela.width/45);tctx.font=`700 ${fs}px system-ui,sans-serif`;const w=tctx.measureText(txt).width,x0=centro?x-w/2:x;tctx.fillStyle="rgba(0,0,0,.65)";tctx.fillRect(x0-4,y-fs,w+8,fs+6);tctx.fillStyle=cor;tctx.fillText(txt,x0,y);}
-function aviso(txt,ruim,botao){const a=$("aviso");a.hidden=!txt;a.className="aviso"+(ruim?" ruim":"");a.textContent=txt||"";if(botao){const b=document.createElement("button");b.textContent=botao.txt;b.onclick=botao.fn;a.appendChild(document.createElement("br"));a.appendChild(b);}if(txt&&!ruim&&!botao){clearTimeout(aviso.t);aviso.t=setTimeout(()=>{if(a.textContent===txt)a.hidden=true;},6000);}}
-async function ligarCamera(deviceId){const bloq=Camera.bloqueada();if(bloq){aviso(erroDaCamera({name:bloq}),true,{txt:"Usar a Simulação",fn:()=>iniciar("simulacao")});return false;}aviso("Abrindo a câmera… se o navegador perguntar, toque em Permitir.",false);try{const s=await Camera.abrir(deviceId);video.srcObject=s;await video.play().catch(()=>{});aviso("",false);$("btnTrocar").disabled=Camera.ids.length<2;return true;}catch(e){aviso(erroDaCamera(e),true,{txt:"Tentar de novo",fn:()=>ligarCamera()});return false;}}
-function cameraParou(){if(est.fonte!=="camera")return;const vigiava=est.modo==="vigiando"||est.modo==="calibrando";parar();aviso("A câmera parou (tela apagou ou outro app pegou a câmera)."+(vigiava?" A vigia foi pausada.":""),true,{txt:"Religar a câmera",fn:async()=>{if(await ligarCamera())aviso("Câmera de volta. Toque em Vigiar.",false);}});}
-document.addEventListener("visibilitychange",async()=>{if(document.visibilityState!=="visible")return;if(est.modo==="vigiando")Tela.manter();if(est.fonte==="camera"&&!Camera.viva()&&!$("aviso").querySelector("button"))cameraParou();});
-video.addEventListener("resize",()=>ajustarTamanho());
-async function iniciar(fonte){Som.preparar();$("inicio").hidden=true;$("app").hidden=false;parar();est.fonte=fonte;est.aspecto=0;$("simControles").hidden=fonte!=="simulacao";$("btnTrocar").hidden=fonte!=="camera";if(fonte==="simulacao"){Camera.parar();Maquete.iniciar();aviso("Simulação: toque em Achar fitas e depois em Vigiar.",false);}else{const ok=await ligarCamera();if(!ok)return;}render();setTimeout(()=>{if(est.fonte===fonte&&!Object.keys(cantosAtuais()).length)acharFitas(true);},900);}
-function voltar(){parar();Camera.parar();est.fonte=null;$("app").hidden=true;$("inicio").hidden=false;aviso("");render();}
-function parar(){est.modo=est.fonte?"pronto":"desligado";est.vigia=null;est.cal=null;est.ultimo=null;$("contagem").hidden=true;Tela.soltar();for(const c of CORES){const F=est.faz[c.id];F.estado="limpo";F.conf=0;F.pertoDesde=null;}render();}
-function vigiar(){Som.preparar();if(est.modo==="vigiando"||est.modo==="calibrando"||est.modo==="contagem"){parar();return;}if(est.fonte==="camera"&&!Camera.viva()){cameraParou();return;}if(!ajustarTamanho()){aviso("A imagem ainda não chegou. Espere um segundo.",false);return;}const cantos=cantosAtuais(),ids=CORES.filter(c=>cantos[c.id]);if(!ids.length){aviso("Nenhuma cerca marcada. Toque em Achar fitas ou Marcar cantos.",true);return;}fimMarcacao();est.zonas={};for(const c of ids)est.zonas[c.id]=Visao.montarZona(cantos[c.id],est.w,est.h);const ign=ignAtuais();if(ign.length){est.ign=new Uint8Array(est.w*est.h);for(const pol of ign){const m=Visao.mascaraPoligono(pol,est.w,est.h);for(let i=0;i<m.length;i++)if(m[i])est.ign[i]=1;}}else est.ign=null;est.modo="contagem";est.contagemAte=performance.now()/1000+3;aviso("");render();}
-function acharFitas(silencioso){if(!ajustarTamanho()){if(!silencioso)aviso("A imagem ainda não chegou.",false);return;}const achou=Visao.acharCercas(lerQuadro(),est.w,est.h),n=Object.keys(achou).length;if(!n){if(!silencioso)aviso("Não achei nenhuma fita colorida. Melhore a luz, aproxime a câmera ou toque em Marcar cantos.",true);return;}const cantos=cantosAtuais();for(const k in achou)cantos[k]=achou[k];guardar();const nomes=CORES.filter(c=>achou[c.id]).map(c=>est.nomes[c.id]).join(", ");aviso(`Achei ${n} de 4 cercas (${nomes}).`+(n<4?" As que faltam você marca em Marcar cantos.":" Toque em Vigiar."),false);if(est.modo==="vigiando")vigiar(),vigiar();render();}
-function marcar(tipo){if(est.modo!=="pronto")parar();est.marcando={tipo,i:0,pts:[]};$("marcacao").hidden=false;$("mPular").hidden=tipo==="ignorar";textoMarcacao();}
-function textoMarcacao(){const m=est.marcando;if(!m)return;$("marcaTexto").innerHTML=m.tipo==="ignorar"?`Toque nos 4 cantos da área a <b>ignorar</b> (caixa de som, TV, janela): <b>${m.pts.length}/4</b>`:`Toque nos 4 cantos da cerca de <b style="color:${CORES[m.i].hex}">${est.nomes[CORES[m.i].id]}</b> (${CORES[m.i].id}): <b>${m.pts.length}/4</b>`;}
-function fimMarcacao(){est.marcando=null;$("marcacao").hidden=true;render();}
-function proximaMarcacao(){const m=est.marcando;m.pts=[];m.i++;if(m.i>=CORES.length){fimMarcacao();aviso("Cercas marcadas. Toque em Vigiar.",false);}else textoMarcacao();}
-function toque(ev){const r=tela.getBoundingClientRect(),x=(ev.clientX-r.left)/r.width,y=(ev.clientY-r.top)/r.height;if(est.marcando){const m=est.marcando;m.pts.push([x,y]);textoMarcacao();if(m.pts.length===4){const pol=Visao.ordenarCantos(m.pts);if(m.tipo==="ignorar"){ignAtuais().push(pol);guardar();fimMarcacao();aviso("Área ignorada. Toque em Vigiar.",false);}else{cantosAtuais()[CORES[m.i].id]=pol;guardar();proximaMarcacao();}}return;}if(est.fonte==="simulacao"){const b=Maquete.boi,bx=b.x/Maquete.W,by=b.y/Maquete.H;if(Math.hypot(bx-x,(by-y)*0.75)<0.08){Maquete.arrastando=true;b.fila=[];b.alvo=null;tela.setPointerCapture(ev.pointerId);}}}
-tela.addEventListener("pointerdown",toque);
-tela.addEventListener("pointermove",ev=>{if(!Maquete.arrastando)return;const r=tela.getBoundingClientRect();Maquete.boi.x=(ev.clientX-r.left)/r.width*Maquete.W;Maquete.boi.y=(ev.clientY-r.top)/r.height*Maquete.H;});
-tela.addEventListener("pointerup",()=>{if(Maquete.arrastando){Maquete.arrastando=false;Maquete.boi.fila=[{x:Maquete.boi.x,y:Maquete.boi.y,espera:4}];Maquete.boi.alvo=null;}});
-const ROTULOS={limpo:"tudo certo",tentativa:"movimento perto da cerca",suspeito:"rondando a cerca!",invasao:"INVASÃO!"};
-function render(){const pil=$("pilula"),alarme=CORES.some(c=>est.faz[c.id].estado==="invasao");const txt={desligado:"desligado",pronto:"pronto",contagem:"preparando",calibrando:"aprendendo",vigiando:"vigiando"}[est.modo];pil.textContent=alarme?"invasão":txt;pil.className="pilula"+(alarme?" alarme":est.modo==="vigiando"?" vigiando":"");const b=$("btnVigiar"),ativo=["vigiando","calibrando","contagem"].includes(est.modo);b.textContent=ativo?"Parar":"Vigiar";b.className=ativo?"perigo":"primario";$("btnVisao").textContent=est.visao?"Imagem normal":"Visão do computador";const cantos=est.fonte?cantosAtuais():{};$("fazendas").innerHTML=CORES.map(c=>{const F=est.faz[c.id],tem=!!cantos[c.id];return`<div class="faz ${tem?F.estado:"sem"}" style="--c:${c.hex}"><span class="cor">${c.id}</span><span class="nome">${esc(est.nomes[c.id])}</span><span class="estado">${tem?ROTULOS[F.estado]:"cerca não marcada"}</span></div>`;}).join("");$("simPular").innerHTML=CORES.map(c=>`<button data-pula="${c.id}" style="border-left:5px solid ${c.hex}">${esc(est.nomes[c.id])}</button>`).join("");}
-function renderRegistro(){$("registroVazio").hidden=est.registro.length>0;$("registro").innerHTML=est.registro.map(o=>`<li>${o.foto?`<img src="${o.foto}" alt="Foto da ocorrência">`:""}<div><b style="color:${o.cor.hex}">${esc(o.nome)}</b>: ${o.tipo==="invasao"?"invasão da fazenda":"alguém rondando a cerca"}<br><time>${o.hora.toLocaleTimeString("pt-BR")}</time>${o.envio?` <span class="envio ${o.envioOk?"ok":"ruim"}">${esc(o.envio)}</span>":""}</div></li>`).join("");}
-function esc(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
-function renderNomes(){$("nomes").innerHTML=CORES.map(c=>`<input type="text" id="nome-${c.id}" value="${esc(est.nomes[c.id])}" aria-label="Dono da fazenda ${c.id}" style="border-left:5px solid ${c.hex}">`).join("");CORES.forEach(c=>$("nome-"+c.id).addEventListener("input",e=>{est.nomes[c.id]=e.target.value||c.nome;guardar();render();renderTelegram();}));}
+/* ========== Configuração (mesmos valores do cerca_fazendas.py) ========== */
+const P = {
+  LIMIAR: 30, AREA_MIN: 0.0013, DESLOC: 0.06, MARGEM: 0.07, FAIXA: 0.035,
+  RONDANDO: 4, PARADO: 5, ABSORVER: 20, PESO_RUIDO: 2.5, RUIDO_MAX: 80,
+  CONFIRMA: 3, DESARMA: 2, INTERVALO: 15, QUADROS_CALIB: 24, LARG_PROC: 192
+};
+const CORES = [
+  {id:"azul",     nome:"Isaac",    hex:"#3b82e8", h:[185,255], s:.40, v:.20},
+  {id:"vermelho", nome:"Matheus",  hex:"#e0413a", h:[335,15],  s:.45, v:.25},
+  {id:"amarelo",  nome:"Ezequiel", hex:"#f0c419", h:[35,70],   s:.40, v:.40},
+  {id:"verde",    nome:"Rian",     hex:"#2fae5b", h:[75,165],  s:.35, v:.20}
+];
+const CHAVE = "cercaDemo.v2";
+const $ = id => document.getElementById(id);
+
+/* ========== Guardar ajustes no aparelho ========== */
+const Guarda = {
+  ler(){ try { return JSON.parse(localStorage.getItem(CHAVE)) || {}; } catch(e){ return {}; } },
+  salvar(d){ try { localStorage.setItem(CHAVE, JSON.stringify(d)); } catch(e){} }
+};
+
+/* ========== Visão: funções de imagem ========== */
+const Visao = {
+  paraRGB(data, n){
+    const out = new Float32Array(n*3);
+    for (let i=0,j=0,k=0;i<n;i++,j+=4,k+=3){ out[k]=data[j]; out[k+1]=data[j+1]; out[k+2]=data[j+2]; }
+    return out;
+  },
+  borrar(src, w, h){
+    const tmp = new Float32Array(src.length), out = new Float32Array(src.length);
+    for (let y=0;y<h;y++) for (let x=0;x<w;x++){
+      const a=Math.max(0,x-1), b=Math.min(w-1,x+1), o=(y*w+x)*3, oa=(y*w+a)*3, ob=(y*w+b)*3;
+      for (let c=0;c<3;c++) tmp[o+c]=(src[oa+c]+src[o+c]+src[ob+c])/3;
+    }
+    for (let y=0;y<h;y++){
+      const a=Math.max(0,y-1), b=Math.min(h-1,y+1);
+      for (let x=0;x<w;x++){
+        const o=(y*w+x)*3, oa=(a*w+x)*3, ob=(b*w+x)*3;
+        for (let c=0;c<3;c++) out[o+c]=(tmp[oa+c]+tmp[o+c]+tmp[ob+c])/3;
+      }
+    }
+    return out;
+  },
+  morf(m, w, h, dilata){
+    const out = new Uint8Array(m.length);
+    for (let y=0;y<h;y++) for (let x=0;x<w;x++){
+      let r = dilata ? 0 : 1;
+      for (let dy=-1;dy<=1 && (dilata ? !r : r);dy++){
+        const yy=y+dy; if (yy<0||yy>=h){ if(!dilata) r=0; continue; }
+        for (let dx=-1;dx<=1;dx++){
+          const xx=x+dx; if (xx<0||xx>=w){ if(!dilata) r=0; continue; }
+          const v=m[yy*w+xx];
+          if (dilata && v){ r=1; break; }
+          if (!dilata && !v){ r=0; break; }
+        }
+      }
+      out[y*w+x]=r;
+    }
+    return out;
+  },
+  componentes(m, w, h, areaMin){
+    const vis = new Uint8Array(m.length), pilha = new Int32Array(m.length), lista=[];
+    for (let i=0;i<m.length;i++){
+      if (!m[i] || vis[i]) continue;
+      let topo=0; pilha[topo++]=i; vis[i]=1; const px=[];
+      let sx=0, sy=0, x0=w, y0=h, x1=0, y1=0;
+      while (topo){
+        const p=pilha[--topo]; px.push(p);
+        const x=p%w, y=(p-x)/w; sx+=x; sy+=y;
+        if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y;
+        if (x>0 && m[p-1] && !vis[p-1]){vis[p-1]=1;pilha[topo++]=p-1;}
+        if (x<w-1 && m[p+1] && !vis[p+1]){vis[p+1]=1;pilha[topo++]=p+1;}
+        if (y>0 && m[p-w] && !vis[p-w]){vis[p-w]=1;pilha[topo++]=p-w;}
+        if (y<h-1 && m[p+w] && !vis[p+w]){vis[p+w]=1;pilha[topo++]=p+w;}
+      }
+      if (px.length>=areaMin) lista.push({px, area:px.length, cx:sx/px.length, cy:sy/px.length, x0, y0, x1, y1});
+    }
+    return lista;
+  },
+  hsv(r,g,b){
+    r/=255; g/=255; b/=255;
+    const mx=Math.max(r,g,b), mn=Math.min(r,g,b), d=mx-mn;
+    let h=0;
+    if (d){ if(mx===r) h=60*(((g-b)/d)%6); else if(mx===g) h=60*((b-r)/d+2); else h=60*((r-g)/d+4); }
+    if (h<0) h+=360;
+    return [h, mx? d/mx : 0, mx];
+  },
+  /* Procura a fita de cada cor e devolve 4 cantos (fração da imagem) */
+  acharCercas(rgb, w, h){
+    const res = {};
+    for (const cor of CORES){
+      const m = new Uint8Array(w*h);
+      for (let i=0;i<w*h;i++){
+        const [hh,s,v] = Visao.hsv(rgb[i*3],rgb[i*3+1],rgb[i*3+2]);
+        const [a,b] = cor.h;
+        const naFaixa = a<=b ? (hh>=a && hh<=b) : (hh>=a || hh<=b);
+        m[i] = (naFaixa && s>=cor.s && v>=cor.v) ? 1 : 0;
+      }
+      const lim = Visao.morf(m,w,h,true);
+      const comps = Visao.componentes(lim, w, h, Math.max(12, w*h*0.002));
+      comps.sort((a,b)=>b.area-a.area);
+      const c = comps.find(c => (c.x1-c.x0)>=w*0.08 && (c.y1-c.y0)>=h*0.08);
+      if (!c) continue;
+      let tl,tr,br,bl, a1=Infinity,a2=-Infinity,a3=-Infinity,a4=Infinity;
+      for (const p of c.px){
+        const x=p%w, y=(p-x)/w;
+        if (x+y<a1){a1=x+y;tl=[x,y];} if (x-y>a2){a2=x-y;tr=[x,y];}
+        if (x+y>a3){a3=x+y;br=[x,y];} if (x-y<a4){a4=x-y;bl=[x,y];}
+      }
+      res[cor.id] = [tl,tr,br,bl].map(([x,y])=>[(x+.5)/w,(y+.5)/h]);
+    }
+    return res;
+  },
+  dentroPoligono(x,y,pol){
+    let d=false;
+    for (let i=0,j=pol.length-1;i<pol.length;j=i++){
+      const [xi,yi]=pol[i],[xj,yj]=pol[j];
+      if (((yi>y)!==(yj>y)) && (x < (xj-xi)*(y-yi)/(yj-yi)+xi)) d=!d;
+    }
+    return d;
+  },
+  distBorda(x,y,pol){
+    let m=Infinity;
+    for (let i=0,j=pol.length-1;i<pol.length;j=i++){
+      const [ax,ay]=pol[j],[bx,by]=pol[i], dx=bx-ax, dy=by-ay, L=dx*dx+dy*dy||1;
+      let t=((x-ax)*dx+(y-ay)*dy)/L; t=Math.max(0,Math.min(1,t));
+      const ex=ax+t*dx-x, ey=ay+t*dy-y; m=Math.min(m,Math.hypot(ex,ey));
+    }
+    return m;
+  },
+  /* 2 = dentro (miolo), 1 = perto (fita + faixa de fora), 0 = longe */
+  montarZona(cantos, w, h){
+    const pol = cantos.map(([x,y])=>[x*w,y*h]), z=new Uint8Array(w*h);
+    const faixa=P.FAIXA*w, margem=P.MARGEM*w;
+    for (let y=0;y<h;y++) for (let x=0;x<w;x++){
+      const cx=x+.5, cy=y+.5, d=Visao.distBorda(cx,cy,pol);
+      z[y*w+x] = Visao.dentroPoligono(cx,cy,pol) ? (d>faixa?2:1) : (d<=margem?1:0);
+    }
+    return z;
+  },
+  mascaraPoligono(cantos, w, h){
+    const pol=cantos.map(([x,y])=>[x*w,y*h]), z=new Uint8Array(w*h);
+    for (let y=0;y<h;y++) for (let x=0;x<w;x++) z[y*w+x]=Visao.dentroPoligono(x+.5,y+.5,pol)?1:0;
+    return z;
+  },
+  ordenarCantos(pts){
+    const cx=pts.reduce((s,p)=>s+p[0],0)/pts.length, cy=pts.reduce((s,p)=>s+p[1],0)/pts.length;
+    return pts.slice().sort((a,b)=>Math.atan2(a[1]-cy,a[0]-cx)-Math.atan2(b[1]-cy,b[0]-cx));
+  }
+};
+
+/* ========== Calibrador: aprende o fundo e quanto cada ponto pisca ========== */
+class Calibrador {
+  constructor(n){ this.s=new Float64Array(n*3); this.q=new Float64Array(n*3); this.k=0; this.n=n; }
+  somar(f){ for (let i=0;i<f.length;i++){ this.s[i]+=f[i]; this.q[i]+=f[i]*f[i]; } this.k++; }
+  resultado(){
+    const fundo=new Float32Array(this.n*3), vari=new Float32Array(this.n), k=this.k, cap=P.RUIDO_MAX*P.RUIDO_MAX;
+    for (let i=0;i<this.n;i++){
+      let mv=0;
+      for (let c=0;c<3;c++){ const m=this.s[i*3+c]/k; fundo[i*3+c]=m; mv=Math.max(mv, this.q[i*3+c]/k-m*m); }
+      vari[i]=Math.min(cap, Math.max(0,mv));
+    }
+    return {fundo, vari};
+  }
+}
+
+/* ========== Vigia: separa movimento de verdade de LED, tremor e luz ========== */
+class Vigia {
+  constructor(w,h,fundo,vari){
+    this.w=w; this.h=h; this.n=w*h; this.fundo=fundo; this.vari=vari;
+    this.desde=new Float32Array(this.n).fill(-1); this.hist=[]; this.rastros=[]; this.proxId=1;
+    this.reaprender=0; this.ganho=[1,1,1]; this.ignorar=null;
+  }
+  _ganho(f){
+    const hs=[new Uint32Array(161),new Uint32Array(161),new Uint32Array(161)], tot=[0,0,0];
+    for (let i=0;i<this.n;i+=2) for (let c=0;c<3;c++){
+      const v=f[i*3+c]; if (v<15||v>240) continue;
+      const r=this.fundo[i*3+c]/v; const b=Math.round((r-0.4)*100); if (b<0||b>160) continue;
+      hs[c][b]++; tot[c]++;
+    }
+    return hs.map((h,c)=>{
+      if (tot[c]<50) return 1;
+      let acc=0; for (let b=0;b<161;b++){ acc+=h[b]; if (acc>=tot[c]/2) return Math.max(0.6,Math.min(1.6,0.4+b/100)); }
+      return 1;
+    });
+  }
+  analisar(f, agora, areaMinFrac, limiar){
+    const {w,h,n,fundo,vari}=this, g=this._ganho(f); this.ganho=g;
+    const mud=new Uint8Array(n), fc=new Float32Array(n*3), dif=new Float32Array(n);
+    const celulas=new Uint32Array(9), celTot=new Uint32Array(9);
+    for (let i=0;i<n;i++){
+      const o=i*3, r=f[o], gg=f[o+1], b=f[o+2];
+      const a0=r*g[0], a1=gg*g[1], a2=b*g[2]; fc[o]=a0; fc[o+1]=a1; fc[o+2]=a2;
+      const d=Math.max(Math.abs(a0-fundo[o]),Math.abs(a1-fundo[o+1]),Math.abs(a2-fundo[o+2])); dif[i]=d;
+      const x=i%w, y=(i-x)/w, cel=Math.min(2,(3*y/h)|0)*3+Math.min(2,(3*x/w)|0); celTot[cel]++;
+      if (Math.max(r,gg,b)>=250 && Math.max(fundo[o],fundo[o+1],fundo[o+2])>=200) continue;
+      if (this.ignorar && this.ignorar[i]) continue;
+      if (d > limiar + P.PESO_RUIDO*Math.sqrt(vari[i])){ mud[i]=1; celulas[cel]++; }
+    }
+    let celCheias=0; for (let c=0;c<9;c++) if (celulas[c]>0.3*celTot[c]) celCheias++;
+    if (celCheias>=7) this.reaprender=8;
+    this.hist.push(f); if (this.hist.length>4) this.hist.shift();
+    if (this.reaprender>0){
+      this.reaprender--;
+      for (let i=0;i<n*3;i++) fundo[i]+=0.3*(fc[i]-fundo[i]);
+      this.desde.fill(-1); this.rastros=[];
+      return {luz:true, mud, manchas:[], rastros:[]};
+    }
+    let m=Visao.morf(Visao.morf(mud,w,h,false),w,h,true); m=Visao.morf(m,w,h,true);
+    const manchas=Visao.componentes(m,w,h,Math.max(4,areaMinFrac*n));
+    const velho=this.hist.length>=4?this.hist[0]:null, limMex=Math.max(12,0.6*limiar);
+    for (const mc of manchas){
+      let k=0;
+      if (velho) for (const p of mc.px){ const o=p*3;
+        if (Math.max(Math.abs(f[o]-velho[o]),Math.abs(f[o+1]-velho[o+1]),Math.abs(f[o+2]-velho[o+2]))>limMex) k++; }
+      mc.mexeu = k>=Math.max(3,0.12*mc.area);
+    }
+    this._seguir(manchas, agora);
+    const cap=P.RUIDO_MAX*P.RUIDO_MAX;
+    for (let i=0;i<n;i++){
+      const o=i*3;
+      if (!mud[i]){
+        fundo[o]+=0.02*(fc[o]-fundo[o]); fundo[o+1]+=0.02*(fc[o+1]-fundo[o+1]); fundo[o+2]+=0.02*(fc[o+2]-fundo[o+2]);
+        vari[i]=Math.min(cap, vari[i]+0.01*(dif[i]*dif[i]-vari[i])); this.desde[i]=-1;
+      } else if (this.desde[i]<0) this.desde[i]=agora;
+      else if (agora-this.desde[i]>P.ABSORVER){ fundo[o]=fc[o]; fundo[o+1]=fc[o+1]; fundo[o+2]=fc[o+2]; this.desde[i]=-1; }
+    }
+    return {luz:false, mud, manchas, rastros:this.rastros};
+  }
+  _seguir(manchas, agora){
+    const w=this.w, usados=new Set();
+    manchas.sort((a,b)=>b.area-a.area);
+    for (const mc of manchas){
+      const lim=Math.max(0.12*w, 1.5*Math.sqrt(mc.area));
+      let melhor=null, md=Infinity;
+      for (const r of this.rastros){ if (usados.has(r)) continue; const d=Math.hypot(r.x-mc.cx,r.y-mc.cy); if (d<lim && d<md){md=d;melhor=r;} }
+      let r=melhor;
+      if (!r){ r={id:this.proxId++, ox:mc.cx, oy:mc.cy, vida:0, mexidas:0, ultMex:agora, anda:false}; this.rastros.push(r); }
+      usados.add(r); r.x=mc.cx; r.y=mc.cy; r.vida++; r.visto=agora;
+      if (mc.mexeu){ r.mexidas++; r.ultMex=agora; }
+      if (agora-r.ultMex>P.PARADO){ r.anda=false; r.ox=r.x; r.oy=r.y; r.mexidas=0; }
+      else if (!r.anda && r.vida>=3 && r.mexidas>=3 && Math.hypot(r.x-r.ox,r.y-r.oy)>=P.DESLOC*w) r.anda=true;
+      mc.rastro=r;
+    }
+    this.rastros=this.rastros.filter(r=>agora-r.visto<0.6);
+  }
+}
+
+/* ========== Som (sirene e bip) ========== */
+const Som = {
+  ctx:null,
+  preparar(){ try { if (!this.ctx) this.ctx=new (window.AudioContext||window.webkitAudioContext)(); if (this.ctx.state==="suspended") this.ctx.resume(); } catch(e){} },
+  tom(f0,f1,dur,tipo,vol){
+    if (!this.ctx) return; const c=this.ctx, t=c.currentTime, o=c.createOscillator(), g=c.createGain();
+    o.type=tipo; o.frequency.setValueAtTime(f0,t);
+    for (let k=0;k<dur/0.5;k++){ o.frequency.linearRampToValueAtTime(f1,t+k*0.5+0.25); o.frequency.linearRampToValueAtTime(f0,t+k*0.5+0.5); }
+    g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(vol,t+0.03); g.gain.setValueAtTime(vol,t+dur-0.1); g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+    o.connect(g).connect(c.destination); o.start(t); o.stop(t+dur+0.05);
+  },
+  sirene(){ this.tom(650,1300,3,"sawtooth",0.25); },
+  bip(){ this.tom(880,880,0.35,"square",0.12); }
+};
+const Tela = {
+  trava:null,
+  async manter(){ try { if ("wakeLock" in navigator && !this.trava) { this.trava=await navigator.wakeLock.request("screen"); this.trava.addEventListener("release",()=>{this.trava=null;}); } } catch(e){} },
+  soltar(){ try { this.trava && this.trava.release(); } catch(e){} this.trava=null; }
+};
+
+/* ========== Maquete simulada (reserva se a câmera falhar) ========== */
+const Maquete = {
+  W:640, H:480, cv:null, ctx:null, ruido:null, luz:1, expo:1, led:true, boi:{x:320,y:240,alvo:null,fila:[]}, arrastando:false,
+  fazendas:{ azul:[20,20,190,210], vermelho:[260,20,430,210], amarelo:[20,270,190,460], verde:[260,270,430,460] },
+  iniciar(){
+    this.cv=document.createElement("canvas"); this.cv.width=this.W; this.cv.height=this.H; this.ctx=this.cv.getContext("2d");
+    const r=document.createElement("canvas"); r.width=256; r.height=256; const rc=r.getContext("2d"), im=rc.createImageData(256,256);
+    for (let i=0;i<im.data.length;i+=4){ const v=Math.random()*255; im.data[i]=im.data[i+1]=im.data[i+2]=v; im.data[i+3]=255; }
+    rc.putImageData(im,0,0); this.ruido=r; this.boi={x:560,y:240,alvo:null,fila:[]}; this.passeio();
+  },
+  /* o boi passeia no curral (lado direito, longe das cercas) */
+  passeio(){ this.boi.fila.push({x:525+Math.random()*90, y:40+Math.random()*400, espera:1.5, v:60}); },
+  ir(pts,v){ this.boi.alvo=null; this.boi.fila=pts.map(p=>({x:p[0],y:p[1],espera:p[2]||0,v:v||150})); },
+  pular(id){
+    const [x0,y0,x1,y1]=this.fazendas[id], cx=(x0+x1)/2, cy=(y0+y1)/2;
+    if (cx>200) this.ir([[540,cy],[cx-20,cy+20,3],[540,cy],[560,240,1]]);
+    else this.ir([[540,240],[225,240],[225,cy],[cx+10,cy+20,3],[225,cy],[225,240],[540,240],[560,240,1]]);
+  },
+  rondar(){ const [x0,y0,x1,y1]=this.fazendas.verde; this.ir([[540,y0+20],[x1+28,y0+20],[x1+28,y1-20],[x1+28,y0+20],[x1+28,y1-20],[540,y1-20],[560,240,1]],60); },
+  quadro(t, dt){
+    const c=this.ctx, b=this.boi;
+    if (!this.arrastando){
+      if (!b.alvo && b.fila.length) b.alvo=b.fila.shift();
+      if (b.alvo){
+        const dx=b.alvo.x-b.x, dy=b.alvo.y-b.y, d=Math.hypot(dx,dy), v=(b.alvo.v||110)*dt;
+        if (d>v){ b.x+=dx/d*v; b.y+=dy/d*v; } else { b.x=b.alvo.x; b.y=b.alvo.y; b.alvo.espera-=dt; if (b.alvo.espera<=0) b.alvo=null; }
+      } else this.passeio();
+    }
+    this.expo += ((1/this.luz)*0.7+0.3 - this.expo)*Math.min(1,dt*0.8);
+    const L=Math.min(1.3,this.luz*this.expo);
+    c.fillStyle=this.tom([40,34,30],L); c.fillRect(0,0,this.W,this.H);
+    for (const cor of CORES){
+      const [x0,y0,x1,y1]=this.fazendas[cor.id];
+      c.fillStyle=this.tom([58,72,44],L); c.fillRect(x0,y0,x1-x0,y1-y0);
+      c.strokeStyle=this.tom(this.rgb(cor.hex),L); c.lineWidth=10; c.strokeRect(x0+5,y0+5,x1-x0-10,y1-y0-10);
+    }
+    c.strokeStyle=this.tom([90,80,70],L); c.lineWidth=3; c.setLineDash([10,8]); c.strokeRect(505,15,125,450); c.setLineDash([]);
+    c.fillStyle=this.tom([25,25,28],L); c.fillRect(80,60,56,76);
+    c.fillStyle=this.tom([60,60,66],L); c.beginPath(); c.arc(108,88,16,0,7); c.fill();
+    if (this.led){
+      const hue=(t*240)%360, on=(Math.sin(t*14)>-0.2);
+      c.fillStyle=on?`hsl(${hue} 100% 60%)`:"#222"; c.fillRect(84,122,48,8);
+      c.beginPath(); c.arc(108,88,6,0,7); c.fill();
+    }
+    c.save(); c.translate(b.x,b.y);
+    c.fillStyle=this.tom([150,95,55],L); c.beginPath(); c.ellipse(0,0,24,16,0,0,7); c.fill();
+    c.fillStyle=this.tom([235,230,220],L); c.beginPath(); c.ellipse(-8,-4,8,6,0,0,7); c.fill();
+    c.fillStyle=this.tom([120,70,40],L); c.beginPath(); c.ellipse(24,-2,10,9,0,0,7); c.fill();
+    c.restore();
+    c.globalAlpha=0.07; c.globalCompositeOperation="overlay";
+    c.drawImage(this.ruido,-(Math.random()*200)|0,-(Math.random()*200)|0,this.W+256,this.H+256);
+    c.globalAlpha=1; c.globalCompositeOperation="source-over";
+  },
+  rgb(hex){ return [1,3,5].map(i=>parseInt(hex.substr(i,2),16)); },
+  tom(rgb,L){ return `rgb(${rgb.map(v=>Math.min(255,v*L)|0).join(",")})`; }
+};
+
+/* ========== Câmera (abrir, religar, trocar, erros) ========== */
+const Camera = {
+  stream:null, ids:[], atual:-1,
+  bloqueada(){
+    if (!window.isSecureContext) return "sem-https";
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return "sem-api";
+    return null;
+  },
+  async abrir(deviceId){
+    this.parar();
+    const video = deviceId ? {deviceId:{exact:deviceId}} : {facingMode:{ideal:"environment"}};
+    Object.assign(video, {width:{ideal:1280}, height:{ideal:720}});
+    let s;
+    try { s = await navigator.mediaDevices.getUserMedia({video, audio:false}); }
+    catch(e){ if (e && (e.name==="OverconstrainedError"||e.name==="ConstraintNotSatisfiedError")) s = await navigator.mediaDevices.getUserMedia({video:true,audio:false}); else throw e; }
+    this.stream=s;
+    s.getVideoTracks().forEach(t=>t.addEventListener("ended",()=>cameraParou()));
+    try { const d=await navigator.mediaDevices.enumerateDevices(); this.ids=d.filter(x=>x.kind==="videoinput").map(x=>x.deviceId).filter(Boolean); } catch(e){ this.ids=[]; }
+    const st=s.getVideoTracks()[0] && s.getVideoTracks()[0].getSettings ? s.getVideoTracks()[0].getSettings() : {};
+    this.atual=this.ids.indexOf(st.deviceId);
+    return s;
+  },
+  viva(){ return !!(this.stream && this.stream.getVideoTracks().some(t=>t.readyState==="live")); },
+  parar(){ if (this.stream) this.stream.getTracks().forEach(t=>t.stop()); this.stream=null; }
+};
+function erroDaCamera(e){
+  const nome = e && e.name || String(e);
+  if (nome==="sem-https") return "A câmera só abre em endereço https (ou no próprio computador). Abra pelo link do GitHub Pages no Chrome ou Safari.";
+  if (nome==="sem-api") return "Este navegador não deixa usar a câmera. Abra no Chrome (Android) ou Safari (iPhone), fora do WhatsApp/Instagram.";
+  if (nome==="NotAllowedError"||nome==="SecurityError") return "A câmera foi bloqueada. "+comoLiberar()+" Se você está abrindo dentro de outro app (WhatsApp, Instagram, Claude), abra no Chrome ou Safari.";
+  if (nome==="NotFoundError"||nome==="DevicesNotFoundError") return "Nenhuma câmera encontrada neste aparelho.";
+  if (nome==="NotReadableError"||nome==="TrackStartError") return "A câmera está ocupada por outro app. Feche os outros apps de câmera e toque em Tentar de novo.";
+  return "Não consegui abrir a câmera ("+nome+"). Toque em Tentar de novo ou use a Simulação.";
+}
+function comoLiberar(){
+  const ua=navigator.userAgent;
+  if (/iPhone|iPad/.test(ua)) return "No iPhone: toque em \"aA\" na barra de endereço > Ajustes do Site > Câmera > Permitir, e recarregue.";
+  if (/Android/.test(ua)) return "No Android: toque no cadeado ao lado do endereço > Permissões > Câmera > Permitir, e recarregue.";
+  return "Clique no cadeado ao lado do endereço, permita a câmera e recarregue a página.";
+}
+
+/* ========== Estado da página ========== */
+const salvo = Guarda.ler();
+const est = {
+  fonte:null, modo:"desligado", visao:false, cal:null, vigia:null, zonas:null, ign:null,
+  w:P.LARG_PROC, h:144, aspecto:0, contagemAte:0, marcando:null, ultimo:null,
+  limiar: salvo.limiar || P.LIMIAR, area: salvo.area || 13, som: salvo.som!==false, suspeito: salvo.suspeito!==false,
+  nomes: Object.assign({}, ...CORES.map(c=>({[c.id]:c.nome})), salvo.nomes||{}),
+  cantos: salvo.cantos || {camera:{}, simulacao:{}},
+  ignorar: salvo.ignorar || {camera:[], simulacao:[]},
+  faz: {}, registro: [],
+  tg: Object.assign({token:"", donos:{}, contatos:[]}, salvo.tg||{})
+};
+for (const c of CORES) est.faz[c.id] = {estado:"limpo", conf:0, ultInv:-1e9, pertoDesde:null, pertoUlt:-1e9, ultAlerta:{invasao:-1e9, suspeito:-1e9}};
+function guardar(){ Guarda.salvar({limiar:est.limiar, area:est.area, som:est.som, suspeito:est.suspeito, nomes:est.nomes, cantos:est.cantos, ignorar:est.ignorar, tg:est.tg}); }
+const tela=$("tela"), tctx=tela.getContext("2d"), video=$("video");
+const proc=document.createElement("canvas"), pctx=proc.getContext("2d",{willReadFrequently:true});
+
+function fonteDims(){
+  if (est.fonte==="simulacao") return [Maquete.W, Maquete.H];
+  return [video.videoWidth||0, video.videoHeight||0];
+}
+function ajustarTamanho(){
+  const [vw,vh]=fonteDims(); if (!vw||!vh) return false;
+  const asp=vw/vh;
+  if (Math.abs(asp-est.aspecto)>0.01){
+    const mudouGirando = est.aspecto>0;
+    est.aspecto=asp; est.w=P.LARG_PROC; est.h=Math.round(P.LARG_PROC/asp);
+    proc.width=est.w; proc.height=est.h;
+    const dw=Math.min(960,vw); tela.width=dw; tela.height=Math.round(dw/asp);
+    if (mudouGirando && (est.modo==="vigiando"||est.modo==="calibrando")){ parar(); aviso("A imagem mudou de formato (celular girou?). Confira as cercas e toque em Vigiar de novo.", false); }
+  }
+  return true;
+}
+function lerQuadro(){
+  pctx.drawImage(est.fonte==="simulacao"?Maquete.cv:video, 0, 0, est.w, est.h);
+  const d=pctx.getImageData(0,0,est.w,est.h).data;
+  return Visao.paraRGB(d, est.w*est.h);
+}
+const cantosAtuais = () => est.cantos[est.fonte] || (est.cantos[est.fonte]={});
+const ignAtuais = () => est.ignorar[est.fonte] || (est.ignorar[est.fonte]=[]);
+
+/* ========== Laço principal ========== */
+let ultProc=0, ultT=performance.now();
+function laco(){
+  requestAnimationFrame(laco);
+  const agoraMs=performance.now(), dt=Math.min(0.1,(agoraMs-ultT)/1000); ultT=agoraMs;
+  if (!est.fonte) return;
+  if (est.fonte==="simulacao") Maquete.quadro(agoraMs/1000, dt);
+  else if (video.readyState<2) return;
+  if (!ajustarTamanho()) return;
+  tctx.drawImage(est.fonte==="simulacao"?Maquete.cv:video, 0, 0, tela.width, tela.height);
+  if (agoraMs-ultProc>=66){ ultProc=agoraMs; passo(agoraMs/1000); }
+  desenhar(agoraMs/1000);
+}
+function passo(agora){
+  if (est.modo==="contagem"){
+    const falta=Math.ceil(est.contagemAte-agora);
+    $("contagem").hidden=false; $("contagem").innerHTML=`${Math.max(1,falta)}<small>Tire a mão e tudo que se mexe da frente da câmera</small>`;
+    if (agora>=est.contagemAte){ est.modo="calibrando"; est.cal=new Calibrador(est.w*est.h); }
+    return;
+  }
+  if (est.modo==="calibrando"){
+    est.cal.somar(Visao.borrar(lerQuadro(),est.w,est.h));
+    $("contagem").innerHTML=`<span style="font-size:28px">Aprendendo o fundo…</span><small>${Math.round(100*est.cal.k/P.QUADROS_CALIB)}%</small>`;
+    if (est.cal.k>=P.QUADROS_CALIB){
+      const {fundo,vari}=est.cal.resultado();
+      est.vigia=new Vigia(est.w,est.h,fundo,vari); est.vigia.ignorar=est.ign; est.cal=null;
+      est.modo="vigiando"; $("contagem").hidden=true; Tela.manter(); render();
+    }
+    return;
+  }
+  if (est.modo==="vigiando"){
+    const f=Visao.borrar(lerQuadro(),est.w,est.h);
+    const r=est.vigia.analisar(f, agora, est.area/10000, est.limiar);
+    est.ultimo=r; avaliar(r, agora);
+  }
+}
+function avaliar(r, agora){
+  for (const c of CORES){
+    const z=est.zonas[c.id], F=est.faz[c.id]; if (!z) continue;
+    let dentro=false, perto=false;
+    if (!r.luz) for (const mc of r.manchas){
+      if (!mc.rastro || !mc.rastro.anda) continue;
+      let kd=0, kp=0; for (const p of mc.px){ if (z[p]===2) kd++; else if (z[p]===1) kp++; }
+      if (kd>=Math.max(4,0.25*mc.area)) dentro=true; else if (kd+kp>0) perto=true;
+    }
+    const antes=F.estado;
+    if (dentro){ F.conf++; F.ultInv=agora; if (F.conf>=P.CONFIRMA) F.estado="invasao"; }
+    else { F.conf=0; if (F.estado==="invasao" && agora-F.ultInv>P.DESARMA) F.estado="limpo"; }
+    if (F.estado!=="invasao"){
+      if (perto||dentro){ if (F.pertoDesde===null) F.pertoDesde=agora; F.pertoUlt=agora; F.estado = agora-F.pertoDesde>=P.RONDANDO ? "suspeito" : "tentativa"; }
+      else if (agora-F.pertoUlt>1){ F.pertoDesde=null; F.estado="limpo"; }
+    }
+    if (F.estado==="invasao" && antes!=="invasao") alertar(c, "invasao", agora);
+    if (F.estado==="suspeito" && antes!=="suspeito" && est.suspeito) alertar(c, "suspeito", agora);
+    if (antes!==F.estado) render();
+  }
+}
+function alertar(cor, tipo, agora){
+  const F=est.faz[cor.id];
+  if (agora-F.ultAlerta[tipo]<P.INTERVALO) return;
+  F.ultAlerta[tipo]=agora;
+  if (est.som){ tipo==="invasao" ? Som.sirene() : Som.bip(); }
+  try { navigator.vibrate && navigator.vibrate(tipo==="invasao"?[400,150,400,150,400]:[150]); } catch(e){}
+  const mini=document.createElement("canvas"); mini.width=320; mini.height=Math.round(320*tela.height/tela.width);
+  mini.getContext("2d").drawImage(tela,0,0,mini.width,mini.height);
+  let foto=""; try { foto=mini.toDataURL("image/jpeg",0.7); } catch(e){}
+  const oc={tipo, cor, nome:est.nomes[cor.id], hora:new Date(), foto, envio:""};
+  est.registro.unshift(oc);
+  if (est.registro.length>30) est.registro.pop();
+  renderRegistro();
+  avisarTelegram(oc, mini);
+}
+
+/* ========== Telegram (direto do navegador; o token fica só no aparelho) ========== */
+const Telegram = {
+  url(m){ return "https://api.telegram.org/bot"+est.tg.token.trim()+"/"+m; },
+  async chamar(metodo, corpo){
+    if (!est.tg.token.trim()) throw new Error("sem token");
+    let r;
+    try { r = await fetch(this.url(metodo), {method:"POST", body:corpo}); }
+    catch(e){ throw new Error("sem internet"); }
+    let j={}; try { j=await r.json(); } catch(e){}
+    if (!j.ok){
+      if (r.status===401||r.status===404) throw new Error("token inválido");
+      if (r.status===403) throw new Error("o dono bloqueou o bot");
+      if (r.status===400 && /chat not found/i.test(j.description||"")) throw new Error("o dono ainda não tocou em Iniciar");
+      throw new Error(j.description||("erro "+r.status));
+    }
+    return j.result;
+  },
+  async mensagem(chat, texto){ const f=new FormData(); f.append("chat_id",chat); f.append("text",texto); return this.chamar("sendMessage",f); },
+  async foto(chat, blob, legenda){ const f=new FormData(); f.append("chat_id",chat); f.append("caption",legenda); f.append("photo",blob,"invasao.jpg"); return this.chamar("sendPhoto",f); },
+  async contatos(){
+    const lista=await this.chamar("getUpdates", new FormData()), achados={};
+    for (const u of lista){
+      const m=u.message||u.edited_message||u.my_chat_member; const ch=m&&m.chat; if (!ch||ch.type!=="private") continue;
+      achados[ch.id]={id:ch.id, nome:[ch.first_name,ch.last_name].filter(Boolean).join(" ")||ch.username||String(ch.id)};
+    }
+    return Object.values(achados);
+  }
+};
+function legendaAlerta(oc){
+  const h=oc.hora.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
+  return oc.tipo==="invasao"
+    ? `🚨 INVASÃO na fazenda de ${oc.nome} (cerca ${oc.cor.id}) às ${h}!`
+    : `⚠️ Movimento suspeito rondando a cerca de ${oc.nome} (${oc.cor.id}) às ${h}.`;
+}
+async function avisarTelegram(oc, mini){
+  const chat=est.tg.donos[oc.cor.id];
+  if (!est.tg.token.trim() || !chat) { if (est.tg.token.trim()){ oc.envio="Telegram: fazenda sem dono escolhido"; oc.envioOk=false; renderRegistro(); } return; }
+  oc.envio="enviando para o Telegram…"; oc.envioOk=true; renderRegistro();
+  const leg=legendaAlerta(oc);
+  try {
+    const blob=await new Promise(r=>mini.toBlob(r,"image/jpeg",0.8));
+    if (!blob) throw new Error("sem foto");
+    await Telegram.foto(chat, blob, leg);
+    oc.envio="✓ foto enviada ao Telegram"; oc.envioOk=true;
+  } catch(e){
+    if (e.message==="sem internet"||e.message==="token inválido"){ oc.envio="Telegram falhou: "+e.message; oc.envioOk=false; }
+    else try { await Telegram.mensagem(chat, leg); oc.envio="✓ mensagem enviada (sem foto)"; oc.envioOk=true; }
+    catch(e2){ oc.envio="Telegram falhou: "+e2.message; oc.envioOk=false; }
+  }
+  renderRegistro();
+}
+function tgMsg(t, ruim){ const m=$("tgMsg"); m.textContent=t; m.style.color= ruim?"var(--perigo)":""; }
+function renderTelegram(){
+  const n=CORES.filter(c=>est.tg.donos[c.id]).length;
+  $("tgResumo").textContent = !est.tg.token ? "· não configurado" : `· ${n} de 4 fazendas ligadas`;
+  const cont=est.tg.contatos||[];
+  $("tgDonos").innerHTML = CORES.map(c=>{
+    const atual=est.tg.donos[c.id]||"";
+    const ops=[`<option value="">ninguém</option>`].concat(cont.map(p=>`<option value="${p.id}" ${String(p.id)===String(atual)?"selected":""}>${esc(p.nome)}</option>`));
+    if (atual && !cont.some(p=>String(p.id)===String(atual))) ops.push(`<option value="${esc(atual)}" selected>contato salvo</option>`);
+    return `<label class="dono" style="border-left:5px solid ${c.hex};padding-left:8px">Fazenda de ${esc(est.nomes[c.id])}<select id="tgDono-${c.id}">${ops.join("")}</select></label>`;
+  }).join("");
+  CORES.forEach(c=>$("tgDono-"+c.id).addEventListener("change",e=>{ est.tg.donos[c.id]=e.target.value; guardar(); renderTelegram(); }));
+}
+async function buscarDonos(){
+  if (!est.tg.token.trim()){ tgMsg("Cole o token do bot primeiro.", true); return; }
+  tgMsg("Buscando quem tocou em Iniciar…");
+  try {
+    const novos=await Telegram.contatos(), mapa={};
+    for (const p of (est.tg.contatos||[]).concat(novos)) mapa[p.id]=p;
+    est.tg.contatos=Object.values(mapa);
+    for (const c of CORES){
+      if (est.tg.donos[c.id]) continue;
+      const nome=(est.nomes[c.id]||"").toLowerCase().split(" ")[0];
+      const p=est.tg.contatos.find(p=>nome && p.nome.toLowerCase().startsWith(nome));
+      if (p) est.tg.donos[c.id]=String(p.id);
+    }
+    guardar(); renderTelegram();
+    tgMsg(novos.length ? `Achei ${est.tg.contatos.length} pessoa(s). Confira o dono de cada fazenda abaixo.` : "Ninguém mandou mensagem ainda. Peça para cada dono abrir o bot, tocar em Iniciar, e toque em Buscar de novo.", !novos.length);
+  } catch(e){ tgMsg("Não deu: "+e.message+".", true); }
+}
+async function testeTelegram(){
+  const alvos=CORES.filter(c=>est.tg.donos[c.id]);
+  if (!est.tg.token.trim()){ tgMsg("Cole o token do bot primeiro.", true); return; }
+  if (!alvos.length){ tgMsg("Escolha o dono de pelo menos uma fazenda.", true); return; }
+  tgMsg("Mandando teste…"); const res=[];
+  for (const c of alvos){
+    try { await Telegram.mensagem(est.tg.donos[c.id], `✅ Teste da Cerca Virtual: você vai receber os alertas da fazenda ${c.id} (${est.nomes[c.id]}).`); res.push(est.nomes[c.id]+" ok"); }
+    catch(e){ res.push(est.nomes[c.id]+": "+e.message); }
+  }
+  tgMsg(res.join(" · "), res.some(r=>!r.endsWith(" ok")));
+}
+
+/* ========== Desenho por cima da imagem ========== */
+function desenhar(t){
+  const sx=tela.width, sy=tela.height, cantos=cantosAtuais();
+  if (est.visao && est.ultimo){
+    const {mud}=est.ultimo, im=pctx.createImageData(est.w,est.h);
+    for (let i=0;i<mud.length;i++){ im.data[i*4]=mud[i]?255:0; im.data[i*4+1]=mud[i]?60:0; im.data[i*4+3]=mud[i]?200:0; }
+    pctx.putImageData(im,0,0); tctx.imageSmoothingEnabled=false; tctx.drawImage(proc,0,0,sx,sy); tctx.imageSmoothingEnabled=true;
+  }
+  tctx.lineWidth=Math.max(2,sx/240);
+  for (const pol of ignAtuais()){
+    tctx.setLineDash([8,6]); tctx.strokeStyle="#bbb"; tctx.fillStyle="rgba(120,120,120,.25)";
+    caminho(pol,sx,sy); tctx.fill(); tctx.stroke(); tctx.setLineDash([]);
+    rotulo("ignorado", pol[0][0]*sx, pol[0][1]*sy-4, "#ccc");
+  }
+  for (const c of CORES){
+    const pol=cantos[c.id]; if (!pol) continue; const F=est.faz[c.id];
+    tctx.strokeStyle=c.hex;
+    if (F.estado==="invasao"){ tctx.fillStyle=(Math.floor(t*4)%2)?"rgba(239,74,60,.45)":"rgba(239,74,60,.15)"; }
+    else if (F.estado==="suspeito") tctx.fillStyle="rgba(242,184,75,.30)";
+    else tctx.fillStyle="rgba(0,0,0,0)";
+    caminho(pol,sx,sy); tctx.fill(); tctx.stroke();
+    const cx=pol.reduce((s,p)=>s+p[0],0)/4*sx, cy=pol.reduce((s,p)=>s+p[1],0)/4*sy;
+    rotulo(est.nomes[c.id]+(F.estado==="invasao"?" · INVASÃO":F.estado==="suspeito"?" · suspeito":""), cx, cy, "#fff", true);
+  }
+  if (est.modo==="vigiando" && est.ultimo){
+    const kx=sx/est.w, ky=sy/est.h;
+    if (est.ultimo.luz) rotulo("luz mudou: reaprendendo", sx/2, 24, "#f2b84b", true);
+    for (const mc of est.ultimo.manchas){
+      const anda=mc.rastro&&mc.rastro.anda;
+      tctx.strokeStyle=anda?"#4cc27a":"rgba(200,200,200,.6)"; tctx.lineWidth=anda?3:1.5;
+      tctx.strokeRect(mc.x0*kx, mc.y0*ky, (mc.x1-mc.x0+1)*kx, (mc.y1-mc.y0+1)*ky);
+      if (anda) rotulo("em movimento", mc.x0*kx, mc.y0*ky-4, "#4cc27a");
+    }
+  }
+  if (est.marcando){
+    const m=est.marcando, pts=m.pts, cor=m.tipo==="ignorar"?"#ddd":CORES[m.i].hex;
+    tctx.strokeStyle=cor; tctx.fillStyle=cor; tctx.lineWidth=3;
+    if (pts.length){ tctx.beginPath(); pts.forEach((p,k)=>k?tctx.lineTo(p[0]*sx,p[1]*sy):tctx.moveTo(p[0]*sx,p[1]*sy)); tctx.stroke(); }
+    for (const p of pts){ tctx.beginPath(); tctx.arc(p[0]*sx,p[1]*sy,Math.max(6,sx/100),0,7); tctx.fill(); }
+  }
+}
+function caminho(pol,sx,sy){ tctx.beginPath(); pol.forEach((p,k)=>k?tctx.lineTo(p[0]*sx,p[1]*sy):tctx.moveTo(p[0]*sx,p[1]*sy)); tctx.closePath(); }
+function rotulo(txt,x,y,cor,centro){
+  const fs=Math.max(12,tela.width/45); tctx.font=`700 ${fs}px system-ui,sans-serif`;
+  const w=tctx.measureText(txt).width, x0=centro?x-w/2:x;
+  tctx.fillStyle="rgba(0,0,0,.65)"; tctx.fillRect(x0-4,y-fs,w+8,fs+6);
+  tctx.fillStyle=cor; tctx.fillText(txt,x0,y);
+}
+
+/* ========== Ações ========== */
+function aviso(txt, ruim, botao){
+  const a=$("aviso"); a.hidden=!txt; a.className="aviso"+(ruim?" ruim":"");
+  a.textContent=txt||"";
+  if (botao){ const b=document.createElement("button"); b.textContent=botao.txt; b.onclick=botao.fn; a.appendChild(document.createElement("br")); a.appendChild(b); }
+  if (txt && !ruim && !botao){ clearTimeout(aviso.t); aviso.t=setTimeout(()=>{ if (a.textContent===txt) a.hidden=true; },6000); }
+}
+async function ligarCamera(deviceId){
+  const bloq=Camera.bloqueada();
+  if (bloq){ aviso(erroDaCamera({name:bloq}), true, {txt:"Usar a Simulação", fn:()=>iniciar("simulacao")}); return false; }
+  aviso("Abrindo a câmera… se o navegador perguntar, toque em Permitir.", false);
+  try {
+    const s=await Camera.abrir(deviceId);
+    video.srcObject=s; await video.play().catch(()=>{});
+    aviso("", false); $("btnTrocar").disabled = Camera.ids.length<2;
+    return true;
+  } catch(e){
+    aviso(erroDaCamera(e), true, {txt:"Tentar de novo", fn:()=>ligarCamera()});
+    return false;
+  }
+}
+function cameraParou(){
+  if (est.fonte!=="camera") return;
+  const vigiava = est.modo==="vigiando"||est.modo==="calibrando";
+  parar();
+  aviso("A câmera parou (tela apagou ou outro app pegou a câmera)."+(vigiava?" A vigia foi pausada.":""), true, {txt:"Religar a câmera", fn:async()=>{ if (await ligarCamera()) aviso("Câmera de volta. Toque em Vigiar.", false); }});
+}
+document.addEventListener("visibilitychange", async ()=>{
+  if (document.visibilityState!=="visible") return;
+  if (est.modo==="vigiando") Tela.manter();
+  if (est.fonte==="camera" && !Camera.viva() && !$("aviso").querySelector("button")) cameraParou();
+});
+video.addEventListener("resize", ()=>ajustarTamanho());
+
+async function iniciar(fonte){
+  Som.preparar();
+  $("inicio").hidden=true; $("app").hidden=false;
+  parar(); est.fonte=fonte; est.aspecto=0;
+  $("simControles").hidden = fonte!=="simulacao";
+  $("btnTrocar").hidden = fonte!=="camera";
+  if (fonte==="simulacao"){ Camera.parar(); Maquete.iniciar(); aviso("Simulação: toque em Achar fitas e depois em Vigiar.", false); }
+  else { const ok=await ligarCamera(); if (!ok) return; }
+  render();
+  setTimeout(()=>{ if (est.fonte===fonte && !Object.keys(cantosAtuais()).length) acharFitas(true); }, 900);
+}
+function voltar(){ parar(); Camera.parar(); est.fonte=null; $("app").hidden=true; $("inicio").hidden=false; aviso(""); render(); }
+function parar(){
+  est.modo= est.fonte ? "pronto" : "desligado"; est.vigia=null; est.cal=null; est.ultimo=null; $("contagem").hidden=true; Tela.soltar();
+  for (const c of CORES){ const F=est.faz[c.id]; F.estado="limpo"; F.conf=0; F.pertoDesde=null; }
+  render();
+}
+function vigiar(){
+  Som.preparar();
+  if (est.modo==="vigiando"||est.modo==="calibrando"||est.modo==="contagem"){ parar(); return; }
+  if (est.fonte==="camera" && !Camera.viva()){ cameraParou(); return; }
+  if (!ajustarTamanho()){ aviso("A imagem ainda não chegou. Espere um segundo.", false); return; }
+  const cantos=cantosAtuais(), ids=CORES.filter(c=>cantos[c.id]);
+  if (!ids.length){ aviso("Nenhuma cerca marcada. Toque em Achar fitas ou Marcar cantos.", true); return; }
+  fimMarcacao();
+  est.zonas={}; for (const c of ids) est.zonas[c.id]=Visao.montarZona(cantos[c.id],est.w,est.h);
+  const ign=ignAtuais();
+  if (ign.length){ est.ign=new Uint8Array(est.w*est.h); for (const pol of ign){ const m=Visao.mascaraPoligono(pol,est.w,est.h); for (let i=0;i<m.length;i++) if (m[i]) est.ign[i]=1; } } else est.ign=null;
+  est.modo="contagem"; est.contagemAte=performance.now()/1000+3; aviso(""); render();
+}
+function acharFitas(silencioso){
+  if (!ajustarTamanho()){ if(!silencioso) aviso("A imagem ainda não chegou.", false); return; }
+  const achou=Visao.acharCercas(lerQuadro(), est.w, est.h), n=Object.keys(achou).length;
+  if (!n){ if(!silencioso) aviso("Não achei nenhuma fita colorida. Melhore a luz, aproxime a câmera ou toque em Marcar cantos.", true); return; }
+  const cantos=cantosAtuais(); for (const k in achou) cantos[k]=achou[k]; guardar();
+  const nomes=CORES.filter(c=>achou[c.id]).map(c=>est.nomes[c.id]).join(", ");
+  aviso(`Achei ${n} de 4 cercas (${nomes}).`+(n<4?" As que faltam você marca em Marcar cantos.":" Toque em Vigiar."), false);
+  if (est.modo==="vigiando") vigiar(), vigiar();
+  render();
+}
+function marcar(tipo){
+  if (est.modo!=="pronto") parar();
+  est.marcando={tipo, i:0, pts:[]}; $("marcacao").hidden=false;
+  $("mPular").hidden = tipo==="ignorar"; textoMarcacao();
+}
+function textoMarcacao(){
+  const m=est.marcando; if (!m) return;
+  $("marcaTexto").innerHTML = m.tipo==="ignorar"
+    ? `Toque nos 4 cantos da área a <b>ignorar</b> (caixa de som, TV, janela): <b>${m.pts.length}/4</b>`
+    : `Toque nos 4 cantos da cerca de <b style="color:${CORES[m.i].hex}">${est.nomes[CORES[m.i].id]}</b> (${CORES[m.i].id}): <b>${m.pts.length}/4</b>`;
+}
+function fimMarcacao(){ est.marcando=null; $("marcacao").hidden=true; render(); }
+function proximaMarcacao(){ const m=est.marcando; m.pts=[]; m.i++; if (m.i>=CORES.length){ fimMarcacao(); aviso("Cercas marcadas. Toque em Vigiar.", false); } else textoMarcacao(); }
+function toque(ev){
+  const r=tela.getBoundingClientRect(), x=(ev.clientX-r.left)/r.width, y=(ev.clientY-r.top)/r.height;
+  if (est.marcando){
+    const m=est.marcando; m.pts.push([x,y]); textoMarcacao();
+    if (m.pts.length===4){
+      const pol=Visao.ordenarCantos(m.pts);
+      if (m.tipo==="ignorar"){ ignAtuais().push(pol); guardar(); fimMarcacao(); aviso("Área ignorada. Toque em Vigiar.", false); }
+      else { cantosAtuais()[CORES[m.i].id]=pol; guardar(); proximaMarcacao(); }
+    }
+    return;
+  }
+  if (est.fonte==="simulacao"){
+    const b=Maquete.boi, bx=b.x/Maquete.W, by=b.y/Maquete.H;
+    if (Math.hypot(bx-x,(by-y)*0.75)<0.08){ Maquete.arrastando=true; b.fila=[]; b.alvo=null; tela.setPointerCapture(ev.pointerId); }
+  }
+}
+tela.addEventListener("pointerdown", toque);
+tela.addEventListener("pointermove", ev=>{ if (!Maquete.arrastando) return; const r=tela.getBoundingClientRect(); Maquete.boi.x=(ev.clientX-r.left)/r.width*Maquete.W; Maquete.boi.y=(ev.clientY-r.top)/r.height*Maquete.H; });
+tela.addEventListener("pointerup", ()=>{ if (Maquete.arrastando){ Maquete.arrastando=false; Maquete.boi.fila=[{x:Maquete.boi.x,y:Maquete.boi.y,espera:4}]; Maquete.boi.alvo=null; } });
+
+/* ========== Tela ========== */
+const ROTULOS={limpo:"tudo certo", tentativa:"movimento perto da cerca", suspeito:"rondando a cerca!", invasao:"INVASÃO!"};
+function render(){
+  const pil=$("pilula"), alarme=CORES.some(c=>est.faz[c.id].estado==="invasao");
+  const txt={desligado:"desligado", pronto:"pronto", contagem:"preparando", calibrando:"aprendendo", vigiando:"vigiando"}[est.modo];
+  pil.textContent= alarme?"invasão":txt; pil.className="pilula"+(alarme?" alarme":est.modo==="vigiando"?" vigiando":"");
+  const b=$("btnVigiar"), ativo=["vigiando","calibrando","contagem"].includes(est.modo);
+  b.textContent= ativo?"Parar":"Vigiar"; b.className= ativo?"perigo":"primario";
+  $("btnVisao").textContent = est.visao ? "Imagem normal" : "Visão do computador";
+  const cantos=est.fonte?cantosAtuais():{};
+  $("fazendas").innerHTML = CORES.map(c=>{
+    const F=est.faz[c.id], tem=!!cantos[c.id];
+    return `<div class="faz ${tem?F.estado:"sem"}" style="--c:${c.hex}"><span class="cor">${c.id}</span><span class="nome">${esc(est.nomes[c.id])}</span><span class="estado">${tem?ROTULOS[F.estado]:"cerca não marcada"}</span></div>`;
+  }).join("");
+  $("simPular").innerHTML = CORES.map(c=>`<button data-pula="${c.id}" style="border-left:5px solid ${c.hex}">${esc(est.nomes[c.id])}</button>`).join("");
+}
+function renderRegistro(){
+  $("registroVazio").hidden = est.registro.length>0;
+  $("registro").innerHTML = est.registro.map(o=>`<li>${o.foto?`<img src="${o.foto}" alt="Foto da ocorrência">`:""}<div><b style="color:${o.cor.hex}">${esc(o.nome)}</b>: ${o.tipo==="invasao"?"invasão da fazenda":"alguém rondando a cerca"}<br><time>${o.hora.toLocaleTimeString("pt-BR")}</time>${o.envio?` <span class="envio ${o.envioOk?"ok":"ruim"}">${esc(o.envio)}</span>`:""}</div></li>`).join("");
+}
+function esc(s){ return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function renderNomes(){
+  $("nomes").innerHTML = CORES.map(c=>`<input type="text" id="nome-${c.id}" value="${esc(est.nomes[c.id])}" aria-label="Dono da fazenda ${c.id}" style="border-left:5px solid ${c.hex}">`).join("");
+  CORES.forEach(c=>$("nome-"+c.id).addEventListener("input",e=>{ est.nomes[c.id]=e.target.value||c.nome; guardar(); render(); renderTelegram(); }));
+}
+
 $("btnCamera").onclick=()=>iniciar("camera");
 $("btnSim").onclick=()=>iniciar("simulacao");
 $("btnVoltar").onclick=voltar;
@@ -268,32 +971,33 @@ $("btnVigiar").onclick=vigiar;
 $("btnAchar").onclick=()=>acharFitas(false);
 $("btnMarcar").onclick=()=>marcar("cercas");
 $("btnIgnorar").onclick=()=>marcar("ignorar");
-$("mDesfazer").onclick=()=>{if(est.marcando){est.marcando.pts.pop();textoMarcacao();}};
-$("mPular").onclick=()=>est.marcando&&proximaMarcacao();
+$("mDesfazer").onclick=()=>{ if (est.marcando){ est.marcando.pts.pop(); textoMarcacao(); } };
+$("mPular").onclick=()=>est.marcando && proximaMarcacao();
 $("mCancelar").onclick=fimMarcacao;
-$("btnTrocar").onclick=async()=>{if(Camera.ids.length<2)return;parar();const i=(Camera.atual+1)%Camera.ids.length;await ligarCamera(Camera.ids[i]);};
-$("btnVisao").onclick=()=>{est.visao=!est.visao;render();};
-$("btnCheia").onclick=()=>{const el=$("palco");try{(document.fullscreenElement?document.exitFullscreen():(el.requestFullscreen||el.webkitRequestFullscreen).call(el));}catch(e){aviso("Tela cheia não funciona neste navegador.",false);}};
-$("simPular").addEventListener("click",e=>{const id=e.target.dataset&&e.target.dataset.pula;if(id)Maquete.pular(id);});
+$("btnTrocar").onclick=async()=>{ if (Camera.ids.length<2) return; parar(); const i=(Camera.atual+1)%Camera.ids.length; await ligarCamera(Camera.ids[i]); };
+$("btnVisao").onclick=()=>{ est.visao=!est.visao; render(); };
+$("btnCheia").onclick=()=>{ const el=$("palco"); try { (document.fullscreenElement?document.exitFullscreen():(el.requestFullscreen||el.webkitRequestFullscreen).call(el)); } catch(e){ aviso("Tela cheia não funciona neste navegador.", false); } };
+$("simPular").addEventListener("click",e=>{ const id=e.target.dataset&&e.target.dataset.pula; if (id) Maquete.pular(id); });
 $("simRondar").onclick=()=>Maquete.rondar();
-$("simLuz").onclick=e=>{Maquete.luz=Maquete.luz===1?0.55:1;e.target.textContent=Maquete.luz===1?"Apagar a luz":"Acender a luz";};
-$("simLed").onclick=e=>{Maquete.led=!Maquete.led;e.target.textContent="LED da caixa: "+(Maquete.led?"ligado":"desligado");};
-$("aLimiar").value=est.limiar;$("vLimiar").textContent=est.limiar;
-$("aArea").value=est.area;$("vArea").textContent=est.area;
-$("aSom").checked=est.som;$("aSuspeito").checked=est.suspeito;
-$("aLimiar").oninput=e=>{est.limiar=+e.target.value;$("vLimiar").textContent=est.limiar;guardar();};
-$("aArea").oninput=e=>{est.area=+e.target.value;$("vArea").textContent=est.area;guardar();};
-$("aSom").onchange=e=>{est.som=e.target.checked;guardar();};
-$("aSuspeito").onchange=e=>{est.suspeito=e.target.checked;guardar();};
-$("btnTesteSom").onclick=()=>{Som.preparar();Som.sirene();try{navigator.vibrate&&navigator.vibrate(300);}catch(e){}};
-$("btnLimparIgn").onclick=()=>{est.ignorar[est.fonte||"camera"]=[];guardar();aviso("Áreas ignoradas apagadas.",false);};
+$("simLuz").onclick=e=>{ Maquete.luz = Maquete.luz===1?0.55:1; e.target.textContent = Maquete.luz===1?"Apagar a luz":"Acender a luz"; };
+$("simLed").onclick=e=>{ Maquete.led=!Maquete.led; e.target.textContent="LED da caixa: "+(Maquete.led?"ligado":"desligado"); };
+$("aLimiar").value=est.limiar; $("vLimiar").textContent=est.limiar;
+$("aArea").value=est.area; $("vArea").textContent=est.area;
+$("aSom").checked=est.som; $("aSuspeito").checked=est.suspeito;
+$("aLimiar").oninput=e=>{ est.limiar=+e.target.value; $("vLimiar").textContent=est.limiar; guardar(); };
+$("aArea").oninput=e=>{ est.area=+e.target.value; $("vArea").textContent=est.area; guardar(); };
+$("aSom").onchange=e=>{ est.som=e.target.checked; guardar(); };
+$("aSuspeito").onchange=e=>{ est.suspeito=e.target.checked; guardar(); };
+$("btnTesteSom").onclick=()=>{ Som.preparar(); Som.sirene(); try{navigator.vibrate&&navigator.vibrate(300);}catch(e){} };
+$("btnLimparIgn").onclick=()=>{ est.ignorar[est.fonte||"camera"]=[]; guardar(); aviso("Áreas ignoradas apagadas.", false); };
 document.addEventListener("pointerdown",()=>Som.preparar(),{once:true});
+
 $("tgToken").value=est.tg.token;
-$("tgToken").addEventListener("input",e=>{est.tg.token=e.target.value.trim();guardar();renderTelegram();});
+$("tgToken").addEventListener("input",e=>{ est.tg.token=e.target.value.trim(); guardar(); renderTelegram(); });
 $("tgBuscar").onclick=buscarDonos;
 $("tgTeste").onclick=testeTelegram;
-renderNomes();render();renderRegistro();renderTelegram();requestAnimationFrame(laco);
-window.CercaDemo={est,Telegram,P,Visao,Vigia,Calibrador,Maquete,Camera,iniciar,vigiar,acharFitas,parar};
+renderNomes(); render(); renderRegistro(); renderTelegram(); requestAnimationFrame(laco);
+window.CercaDemo = {est, Telegram, P, Visao, Vigia, Calibrador, Maquete, Camera, iniciar, vigiar, acharFitas, parar};
 </script>
 </body>
 </html>
